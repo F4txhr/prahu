@@ -4,7 +4,7 @@ import re
 import asyncio
 import requests
 from datetime import datetime
-from flask import Flask, render_template, request, jsonify, send_file, abort, session
+from flask import Flask, render_template, request, jsonify, send_file
 from flask_socketio import SocketIO, emit
 import threading
 import tempfile
@@ -44,27 +44,6 @@ app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
 origins = [o.strip() for o in os.getenv('ALLOWED_ORIGINS', '*').split(',') if o.strip()]
 socketio = SocketIO(app, cors_allowed_origins=origins if origins else '*', async_mode='threading')
-
-API_KEY = os.getenv('API_KEY')
-CSRF_ENABLED = os.getenv('CSRF_ENABLED', 'false').lower() == 'true'
-
-# CSRF protection
-@app.before_request
-def csrf_protect():
-    if not CSRF_ENABLED:
-        return
-    if request.method == 'POST' and request.path.startswith('/api/'):
-        token = request.headers.get('X-CSRF-Token')
-        sess_token = session.get('csrf_token')
-        if not sess_token or not token or token != sess_token:
-            abort(403)
-
-# Helper to require API key on sensitive GET endpoints
-def require_api_key():
-    if API_KEY:
-        key = request.headers.get('X-API-Key')
-        if key != API_KEY:
-            abort(401)
 
 # Global variables to store session data
 session_data = {
@@ -141,11 +120,7 @@ def fetch_vpn_links_from_url(url, url_type='auto'):
 
 @app.route('/')
 def index():
-    # Generate CSRF token per session
-    if 'csrf_token' not in session:
-        import secrets
-        session['csrf_token'] = secrets.token_hex(16)
-    return render_template('index.html', csrf_token=session['csrf_token'])
+    return render_template('index.html')
 
 @app.route('/api/setup-github', methods=['POST'])
 def setup_github():  # legacy endpoint, superseded by save_github_config
@@ -937,55 +912,8 @@ def apply_server_replacement():
     except Exception as e:
         return jsonify({'success': False, 'message': f'Storage error: {str(e)}'})
 
-@app.route('/health')
-def health():
-    require_api_key()
-    checks = {}
-    status = 'ok'
-    # XRAY
-    xray_path = os.getenv('XRAY_PATH', './xray')
-    xray_exists = os.path.exists(xray_path)
-    xray_exec = os.access(xray_path, os.X_OK) if xray_exists else False
-    checks['xray'] = {'path': xray_path, 'exists': xray_exists, 'executable': xray_exec}
-    if not xray_exists:
-        status = 'degraded'
-    # DNS
-    dns_mode = os.getenv('DNS_MODE', 'system')
-    doh_provider = os.getenv('DOH_PROVIDER', 'cloudflare')
-    resolved = resolve_domain('example.com')
-    checks['dns'] = {'mode': dns_mode, 'provider': doh_provider, 'resolve_example': bool(resolved)}
-    if not resolved:
-        status = 'degraded'
-    # Geo endpoints connectivity
-    endpoints = {
-        'ip-api': 'http://ip-api.com/json',
-        'ipinfo': 'https://ipinfo.io/json',
-        'cf-trace': 'https://www.cloudflare.com/cdn-cgi/trace'
-    }
-    geo = {}
-    for name, url in endpoints.items():
-        try:
-            r = requests.get(url, timeout=3)
-            geo[name] = (r.status_code == 200)
-            if not geo[name]:
-                status = 'degraded'
-        except Exception:
-            geo[name] = False
-            status = 'degraded'
-    checks['geo'] = geo
-    # GitHub config
-    cfg = db_get_github_config()
-    checks['github'] = {'configured': bool(cfg), 'owner': (cfg or {}).get('owner'), 'repo': (cfg or {}).get('repo')}
-    # DB basic check (latest session exists?)
-    latest = get_latest_test_session()
-    checks['db'] = {'latest_session': bool(latest)}
-    # App
-    checks['app'] = {'secret_set': app.config.get('SECRET_KEY') not in (None, '', 'your-secret-key-here'), 'allowed_origins': origins}
-    return jsonify({'status': status, 'checks': checks, 'timestamp': datetime.now().isoformat()})
-
 @app.route('/api/export')
 def export_results():
-    require_api_key()
     fmt = request.args.get('format', 'json').lower()
     results = session_data.get('test_results', [])
     if fmt == 'csv':

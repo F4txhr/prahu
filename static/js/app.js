@@ -377,13 +377,7 @@ async function setupGitHub() {
     
     try {
         // USER REQUEST: Save GitHub config to database
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
-        const headers = {
-            'Content-Type': 'application/json',
-        };
-        if (csrf) {
-            headers['X-CSRF-Token'] = csrf;
-        };
+        const headers = { 'Content-Type': 'application/json' };
         const response = await fetch('/api/save-github-config', {
             method: 'POST',
             headers,
@@ -623,13 +617,11 @@ async function addLinksAndTest() {
         showToast('No Input', 'Please paste VPN links or URLs first', 'warning');
         return;
     }
-    const csrf = document.querySelector('meta[name="csrf-token"]').content;
     try {
         const response = await fetch('/api/add-links-and-test', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                ...(document.querySelector('meta[name="csrf-token"]')?.content ? {'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content} : {})
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({ links: inputText })
         });
@@ -909,12 +901,10 @@ async function handleConfigGenerated(data) {
             
             try {
                 // Generate config dengan custom servers
-                const csrf = document.querySelector('meta[name="csrf-token"]').content;
                 const response = await fetch('/api/generate-config', {
                     method: 'POST',
                     headers: {
-                        'Content-Type': 'application/json',
-                        'X-CSRF-Token': csrf
+                        'Content-Type': 'application/json'
                     },
                     body: JSON.stringify({ custom_servers: customServers }),
                 });
@@ -1307,13 +1297,11 @@ function filterResults() {
 async function downloadConfiguration() {
     updateStatus('Preparing download...', 'info');
     try {
-        const csrf = document.querySelector('meta[name="csrf-token"]').content;
         const customServers = getCustomServersForConfig();
         const response = await fetch('/api/generate-config', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                ...(document.querySelector('meta[name="csrf-token"]')?.content ? {'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content} : {})
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({ custom_servers: customServers })
         });
