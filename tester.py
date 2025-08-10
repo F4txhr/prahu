@@ -6,6 +6,12 @@ from converter import extract_ip_port_from_path
 import ssl
 import http.client
 
+USE_XRAY = True
+
+def set_use_xray(value: bool):
+    global USE_XRAY
+    USE_XRAY = bool(value)
+
 def _normalize_domain(value: str) -> str:
     return (value or "").strip().lower()
 
@@ -254,11 +260,13 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                     })
                     print(f"✅ NON-XRAY success: {vpn_type} {test_ip}:{test_port} ({result['TestType']})")
                     try:
-                        from real_geolocation_tester import get_real_geolocation
-                        real_geo = get_real_geolocation(account)
-                        if real_geo:
-                            result.update(real_geo)
-                            print(f"✅ XRAY success: {vpn_type} egress {real_geo.get('Tested IP','-')} {real_geo.get('Provider','-')}")
+                        if USE_XRAY:
+                            from real_geolocation_tester import get_real_geolocation
+                            real_geo = get_real_geolocation(account)
+                            if real_geo:
+                                result.update(real_geo)
+                                result['XRAY'] = True
+                                print(f"✅ XRAY success: {vpn_type} egress {real_geo.get('Tested IP','-')} {real_geo.get('Provider','-')}")
                     except ImportError:
                         pass
                     if live_results is not None:

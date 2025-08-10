@@ -19,6 +19,7 @@ from core import (
     deduplicate_accounts, sort_priority, ensure_ws_path_field,
     build_final_accounts, load_template, test_all_accounts
 )
+from tester import set_use_xray
 from extractor import extract_accounts_from_config
 from converter import parse_link, inject_outbounds_to_template
 from database import save_github_config as db_save_github_config, get_github_config as db_get_github_config, save_test_session, get_latest_test_session
@@ -446,9 +447,30 @@ def handle_start_testing(payload=None):
             # Start periodic updates
             update_thread = emit_periodic_updates()
             
+            async def run_phase(use_xray_flag: bool, indices: list[int] | None = None):
+                set_use_xray(use_xray_flag)
+                targets = session_data['all_accounts'] if not indices else [session_data['all_accounts'][i] for i in indices]
+                await test_all_accounts(targets, semaphore, live_results)
+            
             # Main async function to run tests
             async def run_all_tests():
-                await test_all_accounts(session_data['all_accounts'], semaphore, live_results)
+                selected_mode = (mode or 'accurate').lower()
+                print(f"🧭 Orchestration mode: {selected_mode}")
+                if selected_mode == 'fast':
+                    # Non-XRAY only
+                    await run_phase(False)
+                elif selected_mode == 'xray-only':
+                    # XRAY for all
+                    await run_phase(True)
+                else:
+                    # accurate: filter then xray
+                    print("🚦 Phase 1: Non‑Xray filter")
+                    await run_phase(False)
+                    # shortlist indices that are success
+                    success_idx = [i for i, r in enumerate(live_results) if r.get('Status') == '✅']
+                    print(f"🚦 Phase 2: XRAY confirm on {len(success_idx)} accounts")
+                    if success_idx:
+                        await run_phase(True, success_idx)
                 
                 # Count successful accounts (USER REQUEST: exclude dead accounts from final config)
                 successful_accounts = [res for res in live_results if res["Status"] == "✅"]
