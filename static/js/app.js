@@ -855,6 +855,42 @@ function handleTestingComplete(data) {
     if (data.successful > 0) {
         document.getElementById('config-notification').style.display = 'block';
     }
+
+    // Render testing summary (mode, counts, durations)
+    try {
+        const sum = data.summary || {};
+        const container = document.getElementById('results-summary');
+        if (container) {
+            container.style.display = 'block';
+            const dur1 = sum.phaseDurations?.phase1_ms;
+            const dur2 = sum.phaseDurations?.phase2_ms;
+            const fmt = ms => (typeof ms === 'number' ? `${Math.round(ms/1000)}s` : '—');
+            container.querySelector('.summary-stats').innerHTML = `
+                <div class="summary-item"><span class="summary-value">${sum.mode || '-'}</span><span class="summary-label">Mode</span></div>
+                <div class="summary-item"><span class="summary-value">${sum.nonXraySuccess ?? 0}</span><span class="summary-label">Non‑Xray Success</span></div>
+                <div class="summary-item"><span class="summary-value">${sum.xraySuccess ?? 0}</span><span class="summary-label">Xray Success</span></div>
+                <div class="summary-item"><span class="summary-value">${fmt(dur1)}</span><span class="summary-label">Phase 1</span></div>
+                <div class="summary-item"><span class="summary-value">${fmt(dur2)}</span><span class="summary-label">Phase 2</span></div>
+                ${sum.topNUsed ? `<div class="summary-item"><span class="summary-value">${sum.topNUsed}</span><span class="summary-label">Top‑N</span></div>` : ''}
+            `;
+        }
+    } catch (e) {
+        console.warn('Summary render failed:', e);
+    }
+
+    // Show export buttons
+    try {
+        const exportContainer = document.getElementById('export-buttons');
+        if (exportContainer) {
+            exportContainer.innerHTML = `
+                <div class="download-buttons">
+                    <a class="btn" href="/api/export?format=json">Export JSON</a>
+                    <a class="btn" href="/api/export?format=csv">Export CSV</a>
+                </div>`;
+        }
+    } catch (e) {
+        console.warn('Export buttons render failed:', e);
+    }
 }
 
 // Handle auto-generated configuration - dengan custom servers auto-apply

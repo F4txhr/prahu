@@ -565,6 +565,12 @@ def handle_start_testing(payload=None):
                 # Prepare summary
                 nonx_success = len([r for r in live_results if r.get('Status') == '✅' and not r.get('XRAY')])
                 xray_success = len([r for r in live_results if r.get('Status') == '✅' and r.get('XRAY')])
+                topn_used = None
+                if selected_mode == 'hybrid':
+                    try:
+                        topn_used = int(top_n or 20)
+                    except Exception:
+                        topn_used = None
                 summary = {
                     'mode': selected_mode,
                     'nonXraySuccess': nonx_success,
@@ -572,7 +578,8 @@ def handle_start_testing(payload=None):
                     'phaseDurations': {
                         'phase1_ms': int(((t_mid - t0).total_seconds() * 1000)) if 't_mid' in locals() else None,
                         'phase2_ms': int(((t_end - (t_mid if 't_mid' in locals() else t0)).total_seconds() * 1000))
-                    }
+                    },
+                    'topNUsed': topn_used
                 }
                 
                 # Emit final results
