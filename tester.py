@@ -4,6 +4,7 @@ import re
 from utils import is_alive, geoip_lookup, get_network_stats
 from converter import extract_ip_port_from_path
 import ssl
+import http.client
 
 def _normalize_domain(value: str) -> str:
     return (value or "").strip().lower()
@@ -173,12 +174,46 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                     if tls_enabled and not tls_ok:
                         # Mark as TLSFail and try next target
                         print(f"TLSFail for {sni_for_tls}@{test_ip}:{test_port}")
+                        # try next domain target
+                        break
+
+                    # WS probe if needed
+                    ws_ok = True
+                    transport = account.get('transport', {}) if isinstance(account.get('transport'), dict) else {}
+                    is_ws = (transport.get('type') == 'ws')
+                    if is_ws:
+                        try:
+                            host_header = None
+                            headers = transport.get('headers', {}) if isinstance(transport.get('headers'), dict) else {}
+                            host_header = headers.get('Host') or sni_for_tls
+                            # Build HTTP Upgrade request
+                            conn = http.client.HTTPSConnection(test_ip, test_port, timeout=5, context=ssl.create_default_context()) if tls_enabled else http.client.HTTPConnection(test_ip, test_port, timeout=5)
+                            path = transport.get('path') or '/'
+                            conn.putrequest('GET', path)
+                            if host_header:
+                                conn.putheader('Host', host_header)
+                            conn.putheader('Upgrade', 'websocket')
+                            conn.putheader('Connection', 'Upgrade')
+                            conn.putheader('Sec-WebSocket-Key', 'dGhlIHNhbXBsZSBub25jZQ==')
+                            conn.putheader('Sec-WebSocket-Version', '13')
+                            conn.endheaders()
+                            resp = conn.getresponse()
+                            ws_ok = (resp.status == 101)
+                        except Exception:
+                            ws_ok = False
+                        finally:
+                            try:
+                                conn.close()
+                            except Exception:
+                                pass
+                    if is_ws and not ws_ok:
+                        print(f"WSFail for {sni_for_tls or host_header}@{test_ip}:{test_port}")
                         break
 
                     geo_info = geoip_lookup(test_ip)
                     result.update({
                         "Status": "✅",
-                        "TestType": f"{source_label.upper()} TCP",
+                        "TestType": f"{source_label.upper()} {'WS' if is_ws else 'TCP'}",
                         "Tested IP": test_ip,
                         "Latency": latency,
                         "Jitter": 0,

@@ -15,6 +15,9 @@ from utils import geoip_lookup
 class RealGeolocationTester:
     """Test VPN dengan actual connection untuk mendapatkan ISP asli"""
     
+    _pool = None
+    _pool_size = 4
+
     def __init__(self):
         self.local_http_port = 10809
         self.test_url = 'https://www.google.com'
@@ -26,6 +29,9 @@ class RealGeolocationTester:
             ('ipinfo', 'https://ipinfo.io/json'),
             ('cf-trace', 'https://www.cloudflare.com/cdn-cgi/trace')
         ]
+        if RealGeolocationTester._pool is None:
+            import threading
+            RealGeolocationTester._pool = threading.Semaphore(self._pool_size)
         
     def extract_real_ip_from_path(self, path):
         """Extract IP dari path seperti metode user"""
@@ -774,10 +780,12 @@ class RealGeolocationTester:
             return {'success': False, 'error': 'Xray not available', 'method': 'proxy'}
         
         try:
+            # limit concurrency
+            RealGeolocationTester._pool.acquire()
             # Create Xray config
             config = self.create_xray_config(account)
             if not config:
-                return {'success': False, 'error': 'Config creation failed', 'method': 'proxy'}
+                return {'success': False, 'error': 'Config creation failed', 'method': 'proxy', 'reason': 'ConfigError'}
             
             # Write temp config
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
@@ -859,13 +867,19 @@ class RealGeolocationTester:
                         'method': 'VPN Proxy',
                         'latency': latency_ms
                     }
- 
+                else:
+                    return {'success': False, 'error': 'ProxyConnectFail' if not connect_ok else 'GeoResolveFail', 'method': 'proxy'}
+
             finally:
                 # Cleanup
                 if 'xray_process' in locals():
                     xray_process.kill()
                 os.unlink(temp_config)
-             
+                try:
+                    RealGeolocationTester._pool.release()
+                except Exception:
+                    pass
+         
         except Exception as e:
             return {'success': False, 'error': str(e), 'method': 'proxy'}
          
