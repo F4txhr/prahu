@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>VortexVPN Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
+    <meta name="theme-color" content="#0D1117">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+</head>
+<body>
+    <!-- Loading Screen -->
+    <div id="loading-screen" class="loading-screen">
+        <div class="loading-content">
+            <div class="vortex-logo">
+                <div class="vortex-ring"></div>
+                <div class="vortex-ring"></div>
+                <div class="vortex-ring"></div>
+            </div>
+            <h2>VortexVPN Manager</h2>
+            <p>Loading...</p>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="app" class="app hidden">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <div class="vortex-icon"></div>
+                    <h1>VortexVPN</h1>
+                </div>
+                <div class="status-indicator" id="status-indicator">
+                    <span class="status-dot"></span>
+                    <span id="status-text">Ready</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- USER REQUEST: Navigation removed - single page layout only -->
+
+        <!-- Content Sections -->
+        <main class="main">
+            <!-- Configuration Setup - USER REQUEST: Single page layout dengan setup options -->
+            <div class="page-section">
+                <div class="section-header">
+                    <h2>🔧 Configuration Setup</h2>
+                    <p>Choose your configuration source and setup options</p>
+                </div>
+
+                <!-- Setup Source Options -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>📁 Configuration Source</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="setup-options">
+                            <label class="setup-option">
+                                <input type="radio" name="setup-source" value="template" checked>
+                                <div class="option-card">
+                                    <div class="option-icon">📄</div>
+                                    <div class="option-info">
+                                        <h4>Local Template</h4>
+                                        <p>Use built-in template.json configuration</p>
+                                    </div>
+                                </div>
+                            </label>
+                            <label class="setup-option">
+                                <input type="radio" name="setup-source" value="github">
+                                <div class="option-card">
+                                    <div class="option-icon">🐙</div>
+                                    <div class="option-info">
+                                        <h4>GitHub Repository</h4>
+                                        <p>Load configuration from GitHub repo</p>
+                                    </div>
+                                </div>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- GitHub Setup Card (shown when GitHub option selected) -->
+                <div class="card" id="github-setup-card" style="display: none;">
+                    <div class="card-header">
+                        <h3>🐙 GitHub Configuration</h3>
+                        <span class="badge" id="github-status">Not Configured</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="form-group">
+                            <label for="github-token">GitHub Token</label>
+                            <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxx">
+                            <small>Personal access token with repo permissions</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="github-owner">Repository Owner</label>
+                            <input type="text" id="github-owner" placeholder="username">
+                            <small>GitHub username or organization (auto-filled from database)</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="github-repo">Repository Name</label>
+                            <input type="text" id="github-repo" placeholder="repository">
+                            <small>Repository name (editable even when auto-filled)</small>
+                        </div>
+                        
+                        <!-- GitHub File Selection -->
+                        <div id="github-file-selection" style="display: none;">
+                            <div class="form-group">
+                                <label for="github-files">Select Configuration File</label>
+                                <select id="github-files">
+                                    <option value="">Loading...</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-primary" id="setup-github-btn">
+                            <span class="btn-text">💾 Save GitHub Config</span>
+                            <div class="btn-loader hidden"></div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Template Status Card (shown when Template option selected) -->
+                <div class="card" id="template-status-card">
+                    <div class="card-header">
+                        <h3>📄 Template Configuration</h3>
+                        <span class="badge success">Ready</span>
+                    </div>
+                    <div class="card-content">
+                        <p>✅ Using built-in template.json configuration file.</p>
+                        <small>Configuration will be automatically loaded when you start testing.</small>
+                    </div>
+                </div>
+
+                <!-- Setup Status -->
+                <div class="card" id="setup-status" style="display: none;">
+                    <div class="card-content">
+                        <div class="status-message" id="setup-status-message"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Add Links & Test Section -->
+            <div class="page-section">
+                <div class="section-header">
+                    <h2>🔗 Add VPN Links & Test</h2>
+                    <p>Paste your VPN links and start testing immediately</p>
+                </div>
+
+                <!-- Add Links -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>🤖 Smart VPN Input</h3>
+                        <span class="badge auto-detection">Auto-Detection</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="form-group">
+                            <label for="vpn-links">Paste VPN Links or URLs</label>
+                            <textarea 
+                                id="vpn-links" 
+                                placeholder="🤖 Smart Input - Paste any of these:
+
+📝 VPN Links:
+vless://uuid@server:443?path=/path&security=tls&host=host.com#name
+trojan://password@server:443?path=/path&security=tls&host=host.com#name
+
+🌐 API URLs:
+https://admin.ari-andika2.site/api/v2ray?type=vless&bug=quiz.int.vidio.com&tls=true&limit=5&country=SG
+
+📄 Raw URLs:
+https://raw.githubusercontent.com/user/repo/main/vpn-accounts.txt
+https://pastebin.com/raw/ABC123
+
+✨ The system will automatically detect and process your input!"
+                                rows="12"
+                            ></textarea>
+                            <div class="smart-detection-info">
+                                <div class="detection-indicator" id="detection-indicator">
+                                    <span class="detection-icon">🤖</span>
+                                    <span class="detection-text">Ready for smart detection...</span>
+                                </div>
+                                <small>
+                                    <strong>Auto-Detection Features:</strong><br>
+                                    • 🔗 Direct VPN links → Parse immediately<br>
+                                    • 🌐 Single URL → Auto-fetch from API/Raw<br>  
+                                    • 📚 Multiple URLs → Fetch from all sources<br>
+                                    • ⚡ No manual switching required!
+                                </small>
+                            </div>
+                        </div>
+
+                        <button class="btn btn-success btn-large" id="add-and-test-btn">
+                            <span class="btn-text">🚀 Smart Process & Start Testing</span>
+                            <div class="btn-loader hidden"></div>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Server Replacement -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>🔄 Custom Servers (Auto-Apply)</h3>
+                        <span class="badge" id="server-replace-status">Ready</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="form-group">
+                            <label for="replacement-servers">Custom Server Addresses (Auto-Apply)</label>
+                            <textarea 
+                                id="replacement-servers" 
+                                placeholder="Enter custom server addresses (one per line or comma separated):&#10;custom1.example.com&#10;custom2.example.com&#10;or: custom1.com, custom2.com, custom3.com"
+                                rows="4"
+                            ></textarea>
+                            <small>💡 These servers will be automatically applied when testing completes. Leave empty to use original servers.</small>
+                        </div>
+                        <div class="replacement-stats" id="replacement-stats" style="display: none;">
+                            <div class="stats-row">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="total-vpn-accounts">0</span>
+                                    <span class="stat-label">VPN Accounts</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="total-servers">0</span>
+                                    <span class="stat-label">New Servers</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="accounts-per-server">0</span>
+                                    <span class="stat-label">Per Server</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="info-box">
+                            <div class="info-icon">ℹ️</div>
+                            <div class="info-text">
+                                <strong>Auto-Apply:</strong> Custom servers will be automatically applied when testing completes. 
+                                If multiple servers are provided, they will be randomly distributed across successful accounts.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+
+
+                <!-- Quick Stats -->
+                <div class="card" id="quick-stats" style="display: none;">
+                    <div class="card-header">
+                        <h3>Quick Summary</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="stats-grid">
+                            <div class="stat-item">
+                                <span class="stat-value" id="total-accounts">0</span>
+                                <span class="stat-label">Total Added</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-value" id="test-status">⏳</span>
+                                <span class="stat-label">Status</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live Testing Section -->
+            <div class="page-section">
+                <div class="section-header">
+                    <h2>📊 Live Testing Progress</h2>
+                    <p>Real-time VPN connection testing results</p>
+                </div>
+
+                <!-- Progress -->
+                <div class="card" id="testing-progress" style="display: none;">
+                    <div class="card-header">
+                        <h3>Testing Progress</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="progress-info">
+                            <span id="progress-text">0 / 0 accounts tested</span>
+                            <span id="progress-percent">0%</span>
+                        </div>
+                        <div class="progress-bar">
+                            <div class="progress-fill" id="progress-fill"></div>
+                        </div>
+                        <div class="test-stats">
+                            <div class="test-stat-item success">
+                                <span id="successful-count">0</span>
+                                <span>✅ Success</span>
+                            </div>
+                            <div class="test-stat-item failed">
+                                <span id="failed-count">0</span>
+                                <span>❌ Failed</span>
+                            </div>
+                            <div class="test-stat-item testing">
+                                <span id="testing-count">0</span>
+                                <span>🔄 Testing</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Live Results Table -->
+                <div class="card" id="live-results" style="display: none;">
+                    <div class="card-header">
+                        <h3>Live Test Results</h3>
+                        <small>Updated in real-time</small>
+                    </div>
+                    <div class="card-content">
+                        <div class="testing-table-container">
+                            <table class="testing-table" id="testing-table">
+                                <thead>
+                                    <tr>
+                                        <th class="order-header">No</th>
+                                        <th class="type-header">Type</th>
+                                        <th class="country-header">Country</th>
+                                        <th class="provider-header">Provider</th>
+                                        <th class="ip-header">IP</th>
+                                        <th class="latency-header">Latency</th>
+                                        <th class="jitter-header">Jitter</th>
+                                        <th class="icmp-header">ICMP</th>
+                                        <th class="status-header">Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="testing-table-body">
+                                    <!-- Results will be populated here -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Auto-generated Config Notification -->
+                <div class="card" id="config-notification" style="display: none;">
+                    <div class="card-header">
+                        <h3>✅ Configuration Generated!</h3>
+                    </div>
+                    <div class="card-content">
+                        <p>Your VPN configuration has been automatically generated and is ready for download or upload to GitHub.</p>
+                        <div class="notification-actions">
+                            <button class="btn btn-primary" onclick="switchSection('export')">
+                                📥 Go to Download/Upload
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div class="page-section">
+                <div class="section-header">
+                    <h2>Test Results</h2>
+                    <p>View detailed results and successful connections</p>
+                </div>
+
+                <!-- Results Summary -->
+                <div class="card" id="results-summary" style="display: none;">
+                    <div class="card-header">
+                        <h3>Summary</h3>
+                    </div>
+                    <div class="card-content">
+                        <div class="summary-stats">
+                            <div class="summary-item">
+                                <span class="summary-value" id="summary-successful">0</span>
+                                <span class="summary-label">Successful</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-value" id="summary-failed">0</span>
+                                <span class="summary-label">Failed</span>
+                            </div>
+                            <div class="summary-item">
+                                <span class="summary-value" id="summary-avg-latency">0ms</span>
+                                <span class="summary-label">Avg Latency</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Detailed Results -->
+                <div class="card" id="detailed-results" style="display: none;">
+                    <div class="card-header">
+                        <h3>Detailed Results</h3>
+                        <div class="filter-controls">
+                            <select id="filter-status">
+                                <option value="all">All Results</option>
+                                <option value="successful">Successful Only</option>
+                                <option value="failed">Failed Only</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-content">
+                        <div class="results-table-container">
+                            <div id="results-table"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Download/Upload Section -->
+            <div class="page-section">
+                <div class="section-header">
+                    <h2>⬇️ Download & Upload</h2>
+                    <p>Your configuration has been auto-generated and is ready!</p>
+                </div>
+
+                <!-- Configuration Status -->
+                <div class="card" id="config-status">
+                    <div class="card-header">
+                        <h3>✅ Configuration Ready</h3>
+                        <span class="badge success" id="config-badge">Auto-Generated</span>
+                    </div>
+                    <div class="card-content">
+                        <p>Your VPN configuration has been automatically generated with successful accounts.</p>
+                        <div class="config-info">
+                            <div class="config-stat">
+                                <span class="config-value" id="config-account-count">0</span>
+                                <span class="config-label">Working Accounts</span>
+                            </div>
+                            <div class="config-stat">
+                                <span class="config-value" id="config-timestamp">-</span>
+                                <span class="config-label">Generated</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Download Options -->
+                <div class="card">
+                    <div class="card-header">
+                        <h3>📥 Download Configuration</h3>
+                    </div>
+                    <div class="card-content">
+                        <button class="btn btn-success btn-large" id="download-config-btn">
+                            <span class="btn-text">⬇️ Download VPN Config</span>
+                            <div class="btn-loader hidden"></div>
+                        </button>
+                        <small>Downloads a sing-box compatible JSON configuration file</small>
+                    </div>
+                </div>
+
+                <!-- GitHub Upload -->
+                <div class="card" id="github-upload">
+                    <div class="card-header">
+                        <h3>📤 Upload to GitHub</h3>
+                        <span class="badge" id="github-upload-status">Ready</span>
+                    </div>
+                    <div class="card-content">
+                        <div class="form-group">
+                            <label for="commit-message">Commit Message</label>
+                            <input type="text" id="commit-message" value="Update VPN configuration" placeholder="Enter commit message">
+                        </div>
+                        <button class="btn btn-primary btn-large" id="upload-github-btn">
+                            <span class="btn-text">⬆️ Upload to GitHub</span>
+                            <div class="btn-loader hidden"></div>
+                        </button>
+                        <small>Uploads the configuration to your GitHub repository</small>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <!-- Toast Notifications -->
+        <div id="toast-container" class="toast-container"></div>
+
+        <!-- Bottom Sheet (Mobile) -->
+        <div class="bottom-sheet" id="bottom-sheet">
+            <div class="bottom-sheet-header">
+                <div class="bottom-sheet-handle"></div>
+            </div>
+            <div class="bottom-sheet-content" id="bottom-sheet-content">
+                <!-- Dynamic content -->
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
