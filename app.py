@@ -347,7 +347,15 @@ def add_links_and_test():
     return jsonify(response)
 
 @socketio.on('start_testing')
-def handle_start_testing():
+def handle_start_testing(payload=None):
+    mode = None
+    try:
+        if isinstance(payload, dict):
+            mode = payload.get('mode')
+    except Exception:
+        mode = None
+    if mode:
+        print(f"🧭 Testing mode: {mode}")
     print(f"🔍 DEBUG: start_testing received, accounts count: {len(session_data['all_accounts'])}")
     
     if not session_data['all_accounts']:

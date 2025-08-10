@@ -255,6 +255,12 @@ function setupFormHandlers() {
     document.getElementById('upload-github-btn').addEventListener('click', uploadToGitHub);
 }
 
+// Get selected testing mode
+function getSelectedTestingMode() {
+    const el = document.querySelector('input[name="testing-mode"]:checked');
+    return el ? el.value : 'accurate'; // default accurate
+}
+
 // Handle configuration source change
 function handleConfigSourceChange(event) {
     const githubFileSelection = document.getElementById('github-file-selection');
@@ -744,7 +750,7 @@ function startTesting() {
     
     // Start testing via Socket.IO
     console.log('📡 DEBUG: Emitting start_testing to backend...');
-    socket.emit('start_testing');
+    socket.emit('start_testing', { mode: getSelectedTestingMode() });
     console.log('📡 DEBUG: start_testing emitted successfully');
 }
 
