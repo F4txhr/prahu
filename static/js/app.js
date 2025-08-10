@@ -377,11 +377,14 @@ async function setupGitHub() {
     
     try {
         // USER REQUEST: Save GitHub config to database
+        const csrf = document.querySelector('meta[name="csrf-token"]').content;
+        const headers = {
+            'Content-Type': 'application/json',
+            'X-CSRF-Token': csrf
+        };
         const response = await fetch('/api/save-github-config', {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
+            headers,
             body: JSON.stringify({ token, owner, repo }),
         });
         
@@ -612,79 +615,34 @@ function updateSmartDetectionPreview(text) {
 
 // Add links and start testing - USER REQUEST: Smart detect config source
 async function addLinksAndTest() {
-    const inputText = document.getElementById('vpn-links').value.trim();
-    
+    const textarea = document.getElementById('vpn-links');
+    const inputText = textarea.value.trim();
     if (!inputText) {
-        showToast('No Input', 'Please paste VPN links or URLs', 'warning');
+        showToast('No Input', 'Please paste VPN links or URLs first', 'warning');
         return;
     }
-    
-    setButtonLoading('add-and-test-btn', true);
-    updateStatus('🤖 Smart processing input...', 'info');
-    
-    // USER REQUEST: Smart detect dan auto-load configuration
-    console.log('🔧 DEBUG: Loading configuration based on source...');
-    const configResult = await loadConfigurationBasedOnSource();
-    console.log('🔧 DEBUG: Config result:', configResult);
-    
-    if (!configResult.success) {
-        console.log('❌ DEBUG: Configuration load failed:', configResult);
-        setButtonLoading('add-and-test-btn', false);
-        updateStatus('Configuration load failed', 'error');
-        return;
-    }
-    
-    console.log(`✅ DEBUG: Using ${configResult.source} configuration for testing`);
-    
+    const csrf = document.querySelector('meta[name="csrf-token"]').content;
     try {
         const response = await fetch('/api/add-links-and-test', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
+                'X-CSRF-Token': csrf
             },
-            body: JSON.stringify({ 
-                links: inputText
-            }),
+            body: JSON.stringify({ links: inputText })
         });
-        
         const data = await response.json();
-        
         if (data.success) {
-            showToast('Success', data.message, 'success');
-            updateStatus('Starting tests...', 'info');
-            
-            // Update account counts
-            totalAccounts = data.total_accounts;
-            document.getElementById('total-accounts').textContent = totalAccounts;
-            document.getElementById('test-status').textContent = '🔄';
-            
-            // Load parsed accounts for server replacement
-            await loadParsedAccounts();
-            
-            // Show quick stats
-            document.getElementById('quick-stats').style.display = 'block';
-            
-            // Clear the textarea and reset detection
-            document.getElementById('vpn-links').value = '';
-            updateSmartDetectionPreview('');
-            
-            if (data.invalid_links.length > 0) {
-                showToast('Some Invalid Links', `${data.invalid_links.length} links could not be parsed`, 'warning');
-            }
-            
-            // USER REQUEST: Single page layout - no section switching needed, start testing directly
+            showTestingProgress();
+            initializeTestingTable();
+            updateLiveResults([]);
+            // Start testing after adding links
             startTesting();
-            
         } else {
-            showToast('Add Failed', data.message, 'error');
-            updateStatus('Add failed', 'error');
+            showToast('Add Links Failed', data.message || 'Failed to add links', 'error');
         }
-    } catch (error) {
-        console.error('Add links error:', error);
-        showToast('Network Error', 'Failed to add links', 'error');
-        updateStatus('Network error', 'error');
-    } finally {
-        setButtonLoading('add-and-test-btn', false);
+    } catch (e) {
+        showToast('Network Error', 'Failed to connect to server', 'error');
     }
 }
 
@@ -905,10 +863,12 @@ async function handleConfigGenerated(data) {
             
             try {
                 // Generate config dengan custom servers
+                const csrf = document.querySelector('meta[name="csrf-token"]').content;
                 const response = await fetch('/api/generate-config', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
+                        'X-CSRF-Token': csrf
                     },
                     body: JSON.stringify({ custom_servers: customServers }),
                 });
@@ -1299,33 +1259,41 @@ function filterResults() {
 // Export Functions (Auto-generated, so no manual generation needed)
 
 async function downloadConfiguration() {
-    updateStatus('Downloading configuration...', 'info');
-    
+    updateStatus('Preparing download...', 'info');
     try {
-        const response = await fetch('/api/download-config');
-        
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = response.headers.get('Content-Disposition')?.split('filename=')[1] || 'VortexVpn-config.json';
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-            
-            showToast('Success', 'Configuration downloaded', 'success');
-            updateStatus('Download complete', 'success');
-            logActivity('Configuration downloaded');
-        } else {
-            const data = await response.json();
-            showToast('Download Failed', data.message, 'error');
+        const csrf = document.querySelector('meta[name="csrf-token"]').content;
+        const customServers = getCustomServersForConfig();
+        const response = await fetch('/api/generate-config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRF-Token': csrf
+            },
+            body: JSON.stringify({ custom_servers: customServers })
+        });
+        const data = await response.json();
+        if (!data.success) {
+            showToast('Generate Failed', data.message, 'error');
+            return;
         }
+        const fileResp = await fetch('/api/download-config');
+        if (!fileResp.ok) {
+            showToast('Download Failed', 'No config to download', 'error');
+            return;
+        }
+        const blob = await fileResp.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'VortexVpn-config.json';
+        document.body.appendChild(a);
+        a.click();
+        window.URL.revokeObjectURL(url);
+        document.body.removeChild(a);
+        showToast('Download Ready', 'Configuration downloaded', 'success');
     } catch (error) {
         console.error('Download error:', error);
         showToast('Network Error', 'Failed to download configuration', 'error');
-        updateStatus('Download error', 'error');
     }
 }
 
