@@ -13,6 +13,8 @@ from dotenv import load_dotenv
 from urllib.parse import urlparse
 from io import BytesIO
 
+load_dotenv()
+
 # Import existing modules
 from github_client import GitHubClient
 from core import (
@@ -25,8 +27,9 @@ from converter import parse_link, inject_outbounds_to_template
 from database import save_github_config as db_save_github_config, get_github_config as db_get_github_config, save_test_session, get_latest_test_session
 
 app = Flask(__name__)
-app.config['SECRET_KEY'] = 'your-secret-key-here'
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode='threading')
+app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'your-secret-key-here')
+origins = [o.strip() for o in os.getenv('ALLOWED_ORIGINS', '*').split(',') if o.strip()]
+socketio = SocketIO(app, cors_allowed_origins=origins if origins else '*', async_mode='threading')
 
 # Global variables to store session data
 session_data = {
@@ -458,15 +461,19 @@ def handle_start_testing(payload=None):
             async def run_all_tests():
                 selected_mode = (mode or 'accurate').lower()
                 print(f"🧭 Orchestration mode: {selected_mode}")
+                t0 = datetime.now()
                 if selected_mode == 'fast':
                     # Non-XRAY only
                     await run_phase(False)
+                    t_mid = datetime.now()
                 elif selected_mode == 'xray-only':
                     # XRAY for all
                     await run_phase(True)
+                    t_mid = t0
                 elif selected_mode == 'hybrid':
                     print("🚦 Phase 1: Non‑Xray all")
                     await run_phase(False)
+                    t_mid = datetime.now()
                     successes = [(i, r) for i, r in enumerate(live_results) if r.get('Status') == '✅']
                     # Sort by latency ascending (unknown treated as large)
                     def latency_val(r):
@@ -484,11 +491,13 @@ def handle_start_testing(payload=None):
                     # accurate: filter then xray
                     print("🚦 Phase 1: Non‑Xray filter")
                     await run_phase(False)
+                    t_mid = datetime.now()
                     # shortlist indices that are success
                     success_idx = [i for i, r in enumerate(live_results) if r.get('Status') == '✅']
                     print(f"🚦 Phase 2: XRAY confirm on {len(success_idx)} accounts")
                     if success_idx:
                         await run_phase(True, success_idx)
+                t_end = datetime.now()
                 
                 # Count successful accounts (USER REQUEST: exclude dead accounts from final config)
                 successful_accounts = [res for res in live_results if res["Status"] == "✅"]
@@ -553,12 +562,26 @@ def handle_start_testing(payload=None):
                 print(f"Emitting final testing update: {final_completed}/{len(live_results)} completed")
                 socketio.emit('testing_update', final_data)
                 
+                # Prepare summary
+                nonx_success = len([r for r in live_results if r.get('Status') == '✅' and not r.get('XRAY')])
+                xray_success = len([r for r in live_results if r.get('Status') == '✅' and r.get('XRAY')])
+                summary = {
+                    'mode': selected_mode,
+                    'nonXraySuccess': nonx_success,
+                    'xraySuccess': xray_success,
+                    'phaseDurations': {
+                        'phase1_ms': int(((t_mid - t0).total_seconds() * 1000)) if 't_mid' in locals() else None,
+                        'phase2_ms': int(((t_end - (t_mid if 't_mid' in locals() else t0)).total_seconds() * 1000))
+                    }
+                }
+                
                 # Emit final results
                 socketio.emit('testing_complete', {
                     'results': live_results,
                     'successful': len(successful_accounts),
                     'total': len(live_results),
-                    'session_id': session_id
+                    'session_id': session_id,
+                    'summary': summary
                 })
             
             # Run the async test function
@@ -730,25 +753,15 @@ def load_template_config():
 def get_github_config_route():
     """USER REQUEST: Get saved GitHub config from database for auto-fill"""
     try:
-        # Simple file-based storage for GitHub config
-        config_file = 'github_config.json'
-        
-        if os.path.exists(config_file):
-            with open(config_file, 'r') as f:
-                github_config = json.load(f)
-            
-            # Don't send token for security, just owner (repo editable)
+        cfg = db_get_github_config()
+        if cfg:
             return jsonify({
                 'success': True,
-                'owner': github_config.get('owner', ''),
-                'repo': github_config.get('repo', ''),
-                'has_token': bool(github_config.get('token', ''))
+                'owner': cfg.get('owner', ''),
+                'repo': cfg.get('repo', ''),
+                'has_token': bool(cfg.get('token'))
             })
-        else:
-            return jsonify({
-                'success': False,
-                'message': 'No saved GitHub configuration found'
-            })
+        return jsonify({'success': False, 'message': 'No saved GitHub configuration found'})
     
     except Exception as e:
         return jsonify({
@@ -771,16 +784,7 @@ def save_github_config_route():
                 'message': 'Token, owner, and repo are required'
             })
         
-        # Save to simple file storage
-        github_config = {
-            'token': token,
-            'owner': owner,
-            'repo': repo
-        }
-        
-        config_file = 'github_config.json'
-        with open(config_file, 'w') as f:
-            json.dump(github_config, f, indent=2)
+        db_save_github_config(token, owner, repo)
         
         # Initialize GitHub client in session for immediate use
         with session_lock:
@@ -886,6 +890,28 @@ def apply_server_replacement():
         
     except Exception as e:
         return jsonify({'success': False, 'message': f'Storage error: {str(e)}'})
+
+@app.route('/api/export')
+def export_results():
+    fmt = request.args.get('format', 'json').lower()
+    results = session_data.get('test_results', [])
+    if fmt == 'csv':
+        import csv
+        from io import StringIO
+        fields = ['index','VpnType','Status','Tested IP','Latency','Jitter','Country','Provider','Reason','XRAY']
+        sio = StringIO()
+        writer = csv.DictWriter(sio, fieldnames=fields)
+        writer.writeheader()
+        for r in results:
+            row = {k: r.get(k) for k in fields}
+            writer.writerow(row)
+        mem = BytesIO(sio.getvalue().encode('utf-8'))
+        mem.seek(0)
+        return send_file(mem, as_attachment=True, download_name='results.csv', mimetype='text/csv')
+    # json default
+    mem = BytesIO(json.dumps(results, ensure_ascii=False, indent=2).encode('utf-8'))
+    mem.seek(0)
+    return send_file(mem, as_attachment=True, download_name='results.json', mimetype='application/json')
 
 def parse_servers_input(servers_input):
     """Parse server input (comma or line separated)"""

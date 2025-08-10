@@ -5,6 +5,7 @@ from utils import is_alive, geoip_lookup, get_network_stats
 from converter import extract_ip_port_from_path
 import ssl
 import http.client
+from dns_resolver import resolve_domain
 
 USE_XRAY = True
 
@@ -124,8 +125,9 @@ def get_test_targets(account):
             if _is_ip(domain):
                 targets.append((domain, port, "domain", sni))
             else:
-                resolved_ip = socket.gethostbyname(domain)
-                targets.append((resolved_ip, port, "domain", sni or domain))
+                resolved_ip = resolve_domain(domain)
+                if resolved_ip:
+                    targets.append((resolved_ip, port, "domain", sni or domain))
         except Exception:
             continue
     return targets
@@ -325,6 +327,8 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
 
         # Semua cara sudah dicoba, masih gagal
         result['Status'] = '❌'
+        if not targets:
+            result['Reason'] = 'DNSFail'
         result['Retry'] = MAX_RETRIES
     # Update live_results for failed case
     if live_results is not None:
