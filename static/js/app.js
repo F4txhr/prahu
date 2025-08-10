@@ -849,6 +849,50 @@ function handleTestingComplete(data) {
     } catch (e) {
         console.warn('Export buttons render failed:', e);
     }
+
+    // Charts: Reason distribution and Country/ISP distribution
+    try {
+        const chartsCard = document.getElementById('charts-card');
+        if (chartsCard) chartsCard.style.display = 'block';
+        const reasons = {};
+        const countries = {};
+        const isps = {};
+        (data.results || []).forEach(r => {
+            const reason = r.Reason || '';
+            if (reason) reasons[reason] = (reasons[reason] || 0) + 1;
+            const country = r.Country || '';
+            if (country) countries[country] = (countries[country] || 0) + 1;
+            const isp = r.Provider || '';
+            if (isp) isps[isp] = (isps[isp] || 0) + 1;
+        });
+        const reasonCtx = document.getElementById('reason-chart')?.getContext('2d');
+        const distCtx = document.getElementById('distribution-chart')?.getContext('2d');
+        if (reasonCtx) {
+            const labels = Object.keys(reasons);
+            const dataVals = Object.values(reasons);
+            if (window._reasonChart) window._reasonChart.destroy();
+            window._reasonChart = new Chart(reasonCtx, {
+                type: 'doughnut',
+                data: { labels, datasets: [{ data: dataVals, backgroundColor: ['#ef4444','#f59e0b','#10b981','#3b82f6','#8b5cf6'] }] },
+                options: { plugins: { legend: { display: true } } }
+            });
+        }
+        if (distCtx) {
+            // Show top 8 ISPs (or countries if ISP sparse)
+            const pickTop = (obj, n=8) => Object.entries(obj).sort((a,b)=>b[1]-a[1]).slice(0,n);
+            const topISPs = pickTop(isps);
+            const labels = topISPs.map(([k]) => k);
+            const dataVals = topISPs.map(([,v]) => v);
+            if (window._distChart) window._distChart.destroy();
+            window._distChart = new Chart(distCtx, {
+                type: 'bar',
+                data: { labels, datasets: [{ label: 'Top ISPs', data: dataVals, backgroundColor: '#3b82f6' }] },
+                options: { scales: { y: { beginAtZero: true } }, plugins: { legend: { display: false } } }
+            });
+        }
+    } catch (e) {
+        console.warn('Charts render failed:', e);
+    }
 }
 
 // Handle auto-generated configuration - dengan custom servers auto-apply

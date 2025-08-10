@@ -444,6 +444,23 @@ https://pastebin.com/raw/ABC123
                         </div>
                     </div>
                 </div>
+
+                <!-- Charts: Reason & Distribution -->
+                <div class="card" id="charts-card" style="display: none;">
+                    <div class="card-header">
+                        <h3>Analytics</h3>
+                    </div>
+                    <div class="card-content">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px;">
+                            <div>
+                                <canvas id="reason-chart" height="160"></canvas>
+                            </div>
+                            <div>
+                                <canvas id="distribution-chart" height="160"></canvas>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Download/Upload Section -->
@@ -526,6 +543,7 @@ https://pastebin.com/raw/ABC123
 
     <!-- Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
 </html>
