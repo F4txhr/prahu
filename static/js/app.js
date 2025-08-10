@@ -1007,7 +1007,8 @@ function createTestingRowHtml(result, displayOrder, isActive = false) {
         'Tested IP': result['Tested IP'] || result.server || '-',
         Latency: result.Latency || -1,
         Jitter: result.Jitter || -1,
-        ICMP: result.ICMP || 'N/A'
+        ICMP: result.ICMP || 'N/A',
+        Reason: result.Reason || result.reason || ''
     };
     
     // USER REQUEST: Simplified latency format (no long decimals)
@@ -1015,7 +1016,7 @@ function createTestingRowHtml(result, displayOrder, isActive = false) {
     const jitterText = formatLatency(safeResult.Jitter);
     
     // USER REQUEST: Animated status dot
-    const statusHtml = createAnimatedStatus(safeResult.Status, isActive);
+    const statusHtml = createAnimatedStatus(safeResult.Status, isActive, safeResult.Reason);
     
     return `
         <td class="order-cell">${displayOrder}</td>
@@ -1026,7 +1027,7 @@ function createTestingRowHtml(result, displayOrder, isActive = false) {
         <td class="latency-cell">${latencyText}</td>
         <td class="jitter-cell">${jitterText}</td>
         <td class="icmp-cell">${safeResult.ICMP}</td>
-        <td class="status-cell">${statusHtml}</td>
+        <td class="status-cell">${statusHtml}${safeResult.Reason ? `<div style="font-size:10px;color:#bbb;margin-top:4px;">${safeResult.Reason}</div>` : ''}</td>
     `;
 }
 
@@ -1057,9 +1058,10 @@ function formatLatency(latency) {
 }
 
 // USER REQUEST: Minimalist status with dots only (no text for cleaner UI)
-function createAnimatedStatus(status, isActive) {
+function createAnimatedStatus(status, isActive, reason) {
+    const tip = reason ? `${reason}` : (status.includes('Retry') ? 'Retrying...' : (status.includes('Testing') ? 'Testing...' : status));
     if (status.includes('Testing') || status.includes('Retry') || isActive) {
-        return `<span class="status-dot testing-dot" title="Testing..."></span>`;
+        return `<span class="status-dot testing-dot" title="${tip}"></span>`;
     } else if (status.includes('Timeout Retry')) {
         // USER REQUEST: Show retry progress for timeout (dot only with tooltip)
         const retryMatch = status.match(/Timeout Retry (\d+)\/(\d+)/);
@@ -1068,11 +1070,11 @@ function createAnimatedStatus(status, isActive) {
     } else if (status === '●' || status === '✅' || status.includes('Success')) {
         return `<span class="status-dot success-dot" title="Success"></span>`;
     } else if (status.includes('Timeout') || status.includes('timeout')) {
-        return `<span class="status-dot timeout-dot" title="Timeout"></span>`;
+        return `<span class="status-dot timeout-dot" title="${tip || 'Timeout'}"></span>`;
     } else if (status.includes('Dead') || status.includes('dead') || status.includes('unreachable')) {
-        return `<span class="status-dot dead-dot" title="Dead"></span>`;
+        return `<span class="status-dot dead-dot" title="${tip || 'Dead'}"></span>`;
     } else if (status.startsWith('✖') || status.includes('Failed') || status.includes('Error') || status.includes('failed')) {
-        return `<span class="status-dot failed-dot" title="Failed"></span>`;
+        return `<span class="status-dot failed-dot" title="${tip || 'Failed'}"></span>`;
     } else {
         return `<span class="status-dot waiting-dot" title="Waiting"></span>`;
     }

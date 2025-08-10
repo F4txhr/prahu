@@ -11,6 +11,7 @@ import tempfile
 import subprocess
 from dotenv import load_dotenv
 from urllib.parse import urlparse
+from io import BytesIO
 
 # Import existing modules
 from github_client import GitHubClient
@@ -20,7 +21,7 @@ from core import (
 )
 from extractor import extract_accounts_from_config
 from converter import parse_link, inject_outbounds_to_template
-from database import save_github_config, get_github_config, save_test_session, get_latest_test_session
+from database import save_github_config as db_save_github_config, get_github_config as db_get_github_config, save_test_session, get_latest_test_session
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -36,6 +37,7 @@ session_data = {
     'github_sha': None,
     'custom_servers': None  # Store custom servers untuk config generation
 }
+session_lock = threading.Lock()
 
 MAX_CONCURRENT_TESTS = 5
 TEMPLATE_FILE = "template.json"
@@ -103,7 +105,7 @@ def index():
     return render_template('index.html')
 
 @app.route('/api/setup-github', methods=['POST'])
-def setup_github():
+def setup_github():  # legacy endpoint, superseded by save_github_config
     data = request.json
     token = data.get('token')
     owner = data.get('owner')
@@ -111,8 +113,9 @@ def setup_github():
     
     if token and owner and repo:
         # Save to local database
-        save_github_config(token, owner, repo)
-        session_data['github_client'] = GitHubClient(token, owner, repo)
+        db_save_github_config(token, owner, repo)
+        with session_lock:
+            session_data['github_client'] = GitHubClient(token, owner, repo)
         return jsonify({'success': True, 'message': 'GitHub configured and saved locally'})
     else:
         return jsonify({'success': False, 'message': 'All fields are required'})
@@ -142,21 +145,24 @@ def load_config():
             content, sha = session_data['github_client'].get_file(file_path)
             if content:
                 config_data = json.loads(content)
-                session_data['github_path'] = file_path
-                session_data['github_sha'] = sha
+                with session_lock:
+                    session_data['github_path'] = file_path
+                    session_data['github_sha'] = sha
             else:
                 return jsonify({'success': False, 'message': 'Failed to load file from GitHub'})
         else:
             # Load from local template
             with open(TEMPLATE_FILE, 'r') as f:
                 config_data = json.load(f)
-            session_data['github_path'] = None
-            session_data['github_sha'] = None
+            with session_lock:
+                session_data['github_path'] = None
+                session_data['github_sha'] = None
         
         # Extract existing accounts
         existing_accounts = extract_accounts_from_config(config_data)
         existing_accounts = ensure_ws_path_field(existing_accounts)
-        session_data['all_accounts'] = existing_accounts if isinstance(existing_accounts, list) else []
+        with session_lock:
+            session_data['all_accounts'] = existing_accounts if isinstance(existing_accounts, list) else []
         
         return jsonify({
             'success': True, 
@@ -309,12 +315,12 @@ def add_links_and_test():
         return jsonify({'success': False, 'message': 'No valid accounts could be parsed from the links'})
     
     # Combine with existing accounts and deduplicate
-    if not isinstance(session_data['all_accounts'], list):
-        session_data['all_accounts'] = []
-    
-    all_accounts = session_data['all_accounts'] + accounts_from_links
-    session_data['all_accounts'] = deduplicate_accounts(all_accounts)
-    session_data['all_accounts'] = ensure_ws_path_field(session_data['all_accounts'])
+    with session_lock:
+        if not isinstance(session_data['all_accounts'], list):
+            session_data['all_accounts'] = []
+        all_accounts = session_data['all_accounts'] + accounts_from_links
+        session_data['all_accounts'] = deduplicate_accounts(all_accounts)
+        session_data['all_accounts'] = ensure_ws_path_field(session_data['all_accounts'])
     
     # Create success response with detection info
     response = {
@@ -378,7 +384,8 @@ def handle_start_testing():
                 }
                 live_results.append(result)
             
-            session_data['test_results'] = live_results
+            with session_lock:
+                session_data['test_results'] = live_results
             
             # USER REQUEST: Don't emit initial WAIT accounts - show accounts only when testing starts
             initial_data = {
@@ -466,7 +473,8 @@ def handle_start_testing():
                         fresh_template_data = load_template(TEMPLATE_FILE)
                         final_config_data = inject_outbounds_to_template(fresh_template_data, final_accounts_to_inject)
                         final_config_str = json.dumps(final_config_data, indent=2, ensure_ascii=False)
-                        session_data['final_config'] = final_config_str
+                        with session_lock:
+                            session_data['final_config'] = final_config_str
                         
                         socketio.emit('config_generated', {
                             'success': True,
@@ -528,7 +536,7 @@ def generate_config():
         custom_servers_input = data.get('custom_servers', '').strip()
         
         # Get successful accounts
-        successful_accounts = [res for res in session_data['test_results'] if res["Status"] == "●"]
+        successful_accounts = [res for res in session_data['test_results'] if res["Status"] == "✅"]
         
         if not successful_accounts:
             return jsonify({'success': False, 'message': 'No successful accounts to generate config'})
@@ -553,8 +561,8 @@ def generate_config():
         # Inject accounts
         final_config_data = inject_outbounds_to_template(fresh_template_data, final_accounts_to_inject)
         final_config_str = json.dumps(final_config_data, indent=2, ensure_ascii=False)
-        
-        session_data['final_config'] = final_config_str
+        with session_lock:
+            session_data['final_config'] = final_config_str
         
         return jsonify({
             'success': True,
@@ -575,12 +583,9 @@ def download_config():
     timestamp = datetime.now().strftime("%Y%m%d-%H%M")
     filename = f"VortexVpn-{timestamp}.json"
     
-    # Create temporary file
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
-        f.write(session_data['final_config'])
-        temp_path = f.name
-    
-    return send_file(temp_path, as_attachment=True, download_name=filename, mimetype='application/json')
+    mem = BytesIO(session_data['final_config'].encode('utf-8'))
+    mem.seek(0)
+    return send_file(mem, as_attachment=True, download_name=filename, mimetype='application/json')
 
 @app.route('/api/upload-to-github', methods=['POST'])
 def upload_to_github():
@@ -605,7 +610,7 @@ def upload_to_github():
         )
         
         if result:
-            return jsonify({'success': True, 'message': f'Successfully uploaded to {upload_path}'})
+            return jsonify({'success': True, 'message': f'Successfully uploaded to {upload_path}', 'path': upload_path})
         else:
             return jsonify({'success': False, 'message': 'Failed to upload to GitHub'})
     
@@ -674,7 +679,7 @@ def load_template_config():
         })
 
 @app.route('/api/get-github-config')
-def get_github_config():
+def get_github_config_route():
     """USER REQUEST: Get saved GitHub config from database for auto-fill"""
     try:
         # Simple file-based storage for GitHub config
@@ -704,7 +709,7 @@ def get_github_config():
         })
 
 @app.route('/api/save-github-config', methods=['POST'])
-def save_github_config():
+def save_github_config_route():
     """USER REQUEST: Save GitHub config to database with token persistence"""
     try:
         data = request.json
@@ -729,6 +734,11 @@ def save_github_config():
         with open(config_file, 'w') as f:
             json.dump(github_config, f, indent=2)
         
+        # Initialize GitHub client in session for immediate use
+        with session_lock:
+            session_data['github_client'] = GitHubClient(token, owner, repo)
+            session_data['github_path'] = None
+            session_data['github_sha'] = None
         return jsonify({
             'success': True,
             'message': 'GitHub configuration saved successfully'
@@ -812,7 +822,8 @@ def apply_server_replacement():
         servers = parse_servers_input(servers_input)
         
         # Store servers untuk config generation (BUKAN untuk testing)
-        session_data['custom_servers'] = servers
+        with session_lock:
+            session_data['custom_servers'] = servers
         
         print(f"🔄 Stored {len(servers)} custom servers untuk config generation")
         print(f"🔄 Servers: {servers}")
