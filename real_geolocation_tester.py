@@ -13,6 +13,8 @@ import re
 from utils import geoip_lookup
 import urllib.request
 import platform
+import time
+import threading
 
 def ensure_xray_available(dest_path: str | None = None) -> str | None:
     """Try to download Xray for current platform and chmod +x. Returns path if available."""
@@ -71,7 +73,15 @@ class RealGeolocationTester:
     """Test VPN dengan actual connection untuk mendapatkan ISP asli"""
     
     _pool = None
-    _pool_size = 4
+    _pool_size = int(os.getenv('XRAY_POOL_MAX', '4'))  # start at max, will adjust
+    _pool_min = int(os.getenv('XRAY_POOL_MIN', '2'))
+    _pool_max = int(os.getenv('XRAY_POOL_MAX', '4'))
+    _target_p50_ms = int(os.getenv('XRAY_TARGET_P50_MS', '3500'))
+    _max_fail_rate = float(os.getenv('XRAY_MAX_FAIL_RATE', '0.35'))
+    _stats_lock = threading.Lock()
+    _durations_ms = []  # rolling
+    _complete = 0
+    _fail = 0
 
     def __init__(self):
         self.local_http_port = 10809
@@ -85,7 +95,6 @@ class RealGeolocationTester:
             ('cf-trace', 'https://www.cloudflare.com/cdn-cgi/trace')
         ]
         if RealGeolocationTester._pool is None:
-            import threading
             RealGeolocationTester._pool = threading.Semaphore(self._pool_size)
         
     def extract_real_ip_from_path(self, path):
@@ -374,7 +383,7 @@ class RealGeolocationTester:
             
             # Create modified account dengan cleaned domains for VPN testing
             modified_account = self._create_account_with_cleaned_domains(account, lookup_target, method)
-            vpn_result = self._test_with_actual_vpn_connection(modified_account)
+            vpn_result = self._run_xray_with_retry(modified_account)
             
             # If VPN proxy failed (no xray), try to detect real VPN infrastructure
             if not vpn_result.get('success'):
@@ -945,6 +954,60 @@ class RealGeolocationTester:
             return {'success': False, 'error': str(e), 'method': 'proxy'}
          
         return {'success': False, 'error': 'Connection failed', 'method': 'proxy'}
+
+    def _transient_error(self, err: str | None) -> bool:
+        if not err:
+            return False
+        e = err.lower()
+        return any(x in e for x in ['proxyconnectfail', 'timeout', 'tempor', 'network'])
+
+    def _record_and_adjust(self, duration_ms: int, success: bool):
+        with RealGeolocationTester._stats_lock:
+            RealGeolocationTester._complete += 1
+            if not success:
+                RealGeolocationTester._fail += 1
+            RealGeolocationTester._durations_ms.append(duration_ms)
+            # keep last 50
+            if len(RealGeolocationTester._durations_ms) > 50:
+                RealGeolocationTester._durations_ms = RealGeolocationTester._durations_ms[-50:]
+            # adjust every 5 completions
+            if RealGeolocationTester._complete % 5 == 0 and RealGeolocationTester._durations_ms:
+                sorted_d = sorted(RealGeolocationTester._durations_ms)
+                p50 = sorted_d[len(sorted_d)//2]
+                fail_rate = RealGeolocationTester._fail / max(1, RealGeolocationTester._complete)
+                desired = RealGeolocationTester._pool_size
+                if p50 < RealGeolocationTester._target_p50_ms and fail_rate < RealGeolocationTester._max_fail_rate and RealGeolocationTester._pool_size < RealGeolocationTester._pool_max:
+                    desired = RealGeolocationTester._pool_size + 1
+                elif (p50 > RealGeolocationTester._target_p50_ms or fail_rate >= RealGeolocationTester._max_fail_rate) and RealGeolocationTester._pool_size > RealGeolocationTester._pool_min:
+                    desired = RealGeolocationTester._pool_size - 1
+                if desired != RealGeolocationTester._pool_size:
+                    old = RealGeolocationTester._pool_size
+                    RealGeolocationTester._pool_size = desired
+                    # recreate semaphore for new tasks
+                    RealGeolocationTester._pool = threading.Semaphore(RealGeolocationTester._pool_size)
+                    print(f"🧭 XRAY pool adjust: {old} → {desired} (p50={int(p50)}ms, fail_rate={fail_rate:.2f})")
+
+    def _run_xray_with_retry(self, account):
+        max_retry = int(os.getenv('XRAY_RETRY_TRANSIENT', '1'))
+        backoff_ms = int(os.getenv('XRAY_RETRY_BACKOFF_MS', '600'))
+        start = time.monotonic()
+        attempt = 0
+        last = None
+        while attempt <= max_retry:
+            res = self._test_with_actual_vpn_connection(account)
+            last = res
+            if res.get('success'):
+                dur = int((time.monotonic() - start) * 1000)
+                self._record_and_adjust(dur, True)
+                return res
+            if not self._transient_error(res.get('error')):
+                break
+            attempt += 1
+            if attempt <= max_retry:
+                time.sleep(backoff_ms/1000.0)
+        dur = int((time.monotonic() - start) * 1000)
+        self._record_and_adjust(dur, False)
+        return last
 
 # Integration function untuk existing tester
 def get_real_geolocation(account):
