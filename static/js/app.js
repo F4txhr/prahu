@@ -750,7 +750,14 @@ function startTesting() {
     
     // Start testing via Socket.IO
     console.log('📡 DEBUG: Emitting start_testing to backend...');
-    socket.emit('start_testing', { mode: getSelectedTestingMode() });
+    const mode = getSelectedTestingMode();
+    const payload = { mode };
+    if (mode === 'hybrid') {
+        const nEl = document.getElementById('hybrid-top-n');
+        const n = parseInt(nEl?.value || '20', 10);
+        payload.topN = isNaN(n) ? 20 : Math.max(1, Math.min(999, n));
+    }
+    socket.emit('start_testing', payload);
     console.log('📡 DEBUG: start_testing emitted successfully');
 }
 

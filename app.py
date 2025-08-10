@@ -350,13 +350,15 @@ def add_links_and_test():
 @socketio.on('start_testing')
 def handle_start_testing(payload=None):
     mode = None
+    top_n = None
     try:
         if isinstance(payload, dict):
             mode = payload.get('mode')
+            top_n = payload.get('topN')
     except Exception:
         mode = None
     if mode:
-        print(f"🧭 Testing mode: {mode}")
+        print(f"🧭 Testing mode: {mode}{' (Top‑N='+str(top_n)+')' if (mode=='hybrid' and top_n) else ''}")
     print(f"🔍 DEBUG: start_testing received, accounts count: {len(session_data['all_accounts'])}")
     
     if not session_data['all_accounts']:
@@ -462,6 +464,22 @@ def handle_start_testing(payload=None):
                 elif selected_mode == 'xray-only':
                     # XRAY for all
                     await run_phase(True)
+                elif selected_mode == 'hybrid':
+                    print("🚦 Phase 1: Non‑Xray all")
+                    await run_phase(False)
+                    successes = [(i, r) for i, r in enumerate(live_results) if r.get('Status') == '✅']
+                    # Sort by latency ascending (unknown treated as large)
+                    def latency_val(r):
+                        try:
+                            return float(r.get('Latency')) if isinstance(r.get('Latency'), (int, float, str)) else 1e9
+                        except Exception:
+                            return 1e9
+                    successes.sort(key=lambda x: latency_val(x[1]))
+                    n = int(top_n or 20)
+                    pick = [idx for idx, _ in successes[:max(1, n)]]
+                    print(f"🚦 Phase 2: XRAY Top‑N = {len(pick)}")
+                    if pick:
+                        await run_phase(True, pick)
                 else:
                     # accurate: filter then xray
                     print("🚦 Phase 1: Non‑Xray filter")
