@@ -17,7 +17,9 @@ import platform
 def ensure_xray_available(dest_path: str | None = None) -> str | None:
     """Try to download Xray for current platform and chmod +x. Returns path if available."""
     dest = dest_path or os.getenv('XRAY_PATH') or './xray'
+    print(f"🔎 XRAY check: target path = {dest}")
     if os.path.exists(dest):
+        print(f"✅ XRAY exists: {dest}")
         try:
             os.chmod(dest, 0o755)
         except Exception:
@@ -26,6 +28,7 @@ def ensure_xray_available(dest_path: str | None = None) -> str | None:
     # naive platform mapping
     sys_os = platform.system().lower()
     arch = platform.machine().lower()
+    print(f"🔎 XRAY platform: os={sys_os}, arch={arch}")
     # map to xray-core release asset name (simplified common cases)
     if 'linux' in sys_os:
         if arch in ('x86_64','amd64'):
@@ -39,24 +42,29 @@ def ensure_xray_available(dest_path: str | None = None) -> str | None:
     elif 'windows' in sys_os:
         asset = 'Xray-windows-64.zip'
     else:
+        print("❌ XRAY download: unsupported platform")
         return None
     url = f"https://github.com/XTLS/Xray-core/releases/latest/download/{asset}"
     try:
         tmp_zip = dest + '.zip'
+        print(f"⬇️  XRAY download: {url}")
         urllib.request.urlretrieve(url, tmp_zip)
         import zipfile
         with zipfile.ZipFile(tmp_zip, 'r') as zf:
             # extract xray binary inside archive (name varies 'xray' or 'xray.exe')
             member = next((m for m in zf.namelist() if m.endswith('xray') or m.endswith('xray.exe')), None)
             if not member:
+                print("❌ XRAY download: binary not found in archive")
                 return None
             zf.extract(member, os.path.dirname(dest) or '.')
             extracted = os.path.join(os.path.dirname(dest) or '.', member)
             os.rename(extracted, dest)
         os.remove(tmp_zip)
         os.chmod(dest, 0o755)
+        print(f"✅ XRAY ready at {dest}")
         return dest
-    except Exception:
+    except Exception as e:
+        print(f"❌ XRAY download failed: {e}")
         return None
 
 class RealGeolocationTester:
@@ -822,13 +830,15 @@ class RealGeolocationTester:
 
     def _test_with_actual_vpn_connection(self, account):
         """Test dengan actual VPN connection seperti metode user"""
+        print(f"🔎 XRAY path check: {self.xray_path}")
         if not os.path.exists(self.xray_path):
-            # attempt auto-download
+            print("⚠️  XRAY not found, attempting auto-download...")
             downloaded = ensure_xray_available(self.xray_path)
             if not downloaded or not os.path.exists(downloaded):
                 print(f"⚠️  Xray not found at {self.xray_path}, skipping proxy test")
                 return {'success': False, 'error': 'Xray not available', 'method': 'proxy'}
             self.xray_path = downloaded
+        print(f"✅ XRAY will be used at: {self.xray_path}")
         
         try:
             # limit concurrency

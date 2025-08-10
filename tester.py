@@ -169,8 +169,9 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                                 with context.wrap_socket(raw_sock, server_hostname=sni_for_tls) as tls_sock:
                                     # Handshake happens on wrap
                                     tls_ok = True
-                        except Exception:
+                        except Exception as e:
                             tls_ok = False
+                            result['Reason'] = 'TLSFail'
                     if tls_enabled and not tls_ok:
                         # Mark as TLSFail and try next target
                         print(f"TLSFail for {sni_for_tls}@{test_ip}:{test_port}")
@@ -236,6 +237,7 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                             # No host header/SNI: skip WS probe to avoid false negative
                             ws_ok = True
                     if is_ws and not ws_ok:
+                        result['Reason'] = 'WSFail'
                         print(f"WSFail for {host_header or sni_for_tls}@{test_ip}:{test_port}")
                         # try next target instead of failing total
                         break
@@ -250,11 +252,13 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         "ICMP": "✔",
                         **geo_info
                     })
+                    print(f"✅ NON-XRAY success: {vpn_type} {test_ip}:{test_port} ({result['TestType']})")
                     try:
                         from real_geolocation_tester import get_real_geolocation
                         real_geo = get_real_geolocation(account)
                         if real_geo:
                             result.update(real_geo)
+                            print(f"✅ XRAY success: {vpn_type} egress {real_geo.get('Tested IP','-')} {real_geo.get('Provider','-')}")
                     except ImportError:
                         pass
                     if live_results is not None:
