@@ -3,6 +3,91 @@ import socket
 import re
 from utils import is_alive, geoip_lookup, get_network_stats
 from converter import extract_ip_port_from_path
+import ssl
+
+def _normalize_domain(value: str) -> str:
+    return (value or "").strip().lower()
+
+def _is_ip(value: str) -> bool:
+    try:
+        socket.inet_aton(value)
+        return True
+    except Exception:
+        return False
+
+def _clean_domain_from_server(domain: str, server: str) -> str:
+    """Remove server part from domain if it appears as prefix or suffix, per user rule."""
+    if not domain or not server:
+        return domain
+    if domain == server:
+        return domain
+    if domain.startswith(server + "."):
+        cleaned = domain[len(server) + 1 :]
+        return cleaned or domain
+    if domain.endswith("." + server):
+        cleaned = domain[: -len("." + server)]
+        return cleaned or domain
+    return domain
+
+def _pick_domain_candidates(account: dict) -> list[tuple[str, str]]:
+    """
+    Build ordered domain candidates per rules:
+    - If IP-PORT exists in path, that is handled separately (not here)
+    - From host/sni/server: filter the odd-one-out; clean host/sni if they contain server as prefix/suffix
+    - Only include server if host == server == sni
+
+    Returns list of tuples (domain_for_connect, sni_for_tls)
+    """
+    # Extract raw values
+    server = _normalize_domain(account.get("server"))
+    sni = None
+    tls_cfg = account.get("tls", {}) if isinstance(account.get("tls"), dict) else {}
+    if tls_cfg:
+        sni = _normalize_domain(tls_cfg.get("sni") or tls_cfg.get("server_name"))
+    host = None
+    transport = account.get("transport", {}) if isinstance(account.get("transport"), dict) else {}
+    if transport:
+        headers = transport.get("headers", {}) if isinstance(transport.get("headers"), dict) else {}
+        host = _normalize_domain(headers.get("Host"))
+
+    values = [v for v in [host, sni, server] if v]
+    if not values:
+        return []
+
+    # If all three are the same (or two same and only those two exist), test that domain (server allowed when all equal)
+    uniq = {}
+    for v in values:
+        uniq[v] = uniq.get(v, 0) + 1
+    # Case: two same and one different -> pick the common value and drop the outlier
+    if len(uniq) == 2:
+        # Find the common one (count 2)
+        common = next((k for k, c in uniq.items() if c >= 2), None)
+        if common:
+            return [(common, common)]
+    # Case: all the same (len==1)
+    if len(uniq) == 1:
+        only = next(iter(uniq.keys()))
+        return [(only, only)]
+
+    # Case: all different. If server is contained in host AND sni (as prefix/suffix), clean both and test both
+    candidates: list[tuple[str, str]] = []
+    if server and host and sni:
+        def contains_carrier(d: str, carrier: str) -> bool:
+            return d.startswith(carrier + ".") or d.endswith("." + carrier)
+        if contains_carrier(host, server) and contains_carrier(sni, server):
+            cleaned_host = _clean_domain_from_server(host, server)
+            cleaned_sni = _clean_domain_from_server(sni, server)
+            # Dedup
+            uniq_domains = []
+            for d in [cleaned_host, cleaned_sni]:
+                if d and d not in uniq_domains:
+                    uniq_domains.append(d)
+            for d in uniq_domains:
+                candidates.append((d, d))
+            return candidates
+
+    # Otherwise, no safe domain fallback
+    return []
 
 MAX_RETRIES = 3
 RETRY_DELAY = 1.5  # detik
@@ -13,51 +98,30 @@ def get_first_nonempty(*args):
             return x
     return None
 
-def get_test_target(account):
-    # 1. Coba IP dari path (support SS dan WS path untuk semua protokol)
+def get_test_targets(account):
+    """
+    Return ordered list of candidate targets to test: [(ip, port, source_label, sni_for_tls)]
+    """
+    targets = []
+    # 1) IP:PORT from path
     path_str = account.get("_ss_path") or account.get("_ws_path") or ""
-    target_ip, target_port = extract_ip_port_from_path(path_str)
-    if target_ip:
-        return target_ip, target_port or 443, "path"
+    ip_from_path, port_from_path = extract_ip_port_from_path(path_str)
+    if ip_from_path:
+        targets.append((ip_from_path, int(port_from_path or 443), "path", None))
 
-    # 2. Fallback ke host/sni/server_name/server
-    # Ambil host dari WebSocket headers
-    host = None
-    if "host" in account:
-        host = account["host"]
-    elif "transport" in account and isinstance(account["transport"], dict):
-        host = account["transport"].get("headers", {}).get("Host")
-    # Ambil sni/server_name dari TLS
-    sni = None
-    if "tls" in account and isinstance(account["tls"], dict):
-        sni = account["tls"].get("sni") or account["tls"].get("server_name")
-
-    server = account.get("server")
-    # Jika host/sni/server_name == server, tetap test (tidak hapus)
-    candidates = []
-    # Jangan ulangi value
-    if host and host != server:
-        candidates.append(("host", host))
-    if sni and sni != server and sni != host:
-        candidates.append(("sni", sni))
-    if server:
-        candidates.append(("server", server))
-
-    for label, cand in candidates:
-        # Cek apakah cand adalah IP, kalau ya langsung
+    # 2) Domain candidates per user rules
+    domain_candidates = _pick_domain_candidates(account)
+    port = int(account.get("server_port", 443) or 443)
+    for domain, sni in domain_candidates:
         try:
-            socket.inet_aton(cand)
-            return cand, account.get("server_port", 443), label
-        except Exception:
-            pass
-        # Kalau bukan IP, resolve ke IP
-        try:
-            resolved_ip = socket.gethostbyname(cand)
-            return resolved_ip, account.get("server_port", 443), label
+            if _is_ip(domain):
+                targets.append((domain, port, "domain", sni))
+            else:
+                resolved_ip = socket.gethostbyname(domain)
+                targets.append((resolved_ip, port, "domain", sni or domain))
         except Exception:
             continue
-    # Jika tidak ada yang bisa, return None
-    return None, None, None
+    return targets
 
 async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, live_results=None) -> dict:
     tag = account.get('tag', 'proxy')
@@ -72,127 +136,111 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
 
     async with semaphore:
         # === LOGIKA BARU ===
-        test_ip, test_port, test_source = get_test_target(account)
-        if not test_ip:
+        targets = get_test_targets(account)
+        if not targets:
             result['Status'] = '❌'
             return result
 
-        # USER REQUEST: Retry timeout 3x, then mark as dead
+        # USER REQUEST: Retry timeout 3x per target, then try next target; if all fail, mark dead
         timeout_retries = 3
-        for attempt in range(MAX_RETRIES):
-            # Update status based on retry type
-            if result['TimeoutCount'] > 0:
-                result['Status'] = f'Timeout Retry {result["TimeoutCount"]}/3'
-                print(f"🔄 DEBUG: Account {index} retrying timeout {result['TimeoutCount']}/3")
-            else:
-                result['Status'] = '🔄'
-                print(f"🔄 DEBUG: Account {index} testing (attempt {attempt + 1})")
-            result['Retry'] = attempt
-            
-            # USER REQUEST: Progressive updates - update live_results immediately
-            if live_results is not None:
-                live_results[index].update(result)
-                print(f"📊 DEBUG: Updated live_results for account {index} with status: {result['Status']}")
-                await asyncio.sleep(0.1)  # Small delay to allow emission
-
-            is_conn, latency = is_alive(test_ip, test_port, timeout=5)  # 5s timeout for better detection
-            
-            if is_conn:
-                geo_info = geoip_lookup(test_ip)
-                result.update({
-                    "Status": "✅",
-                    "TestType": f"{test_source.upper()} TCP",
-                    "Tested IP": test_ip,
-                    "Latency": latency,
-                    "Jitter": 0,
-                    "ICMP": "✔",
-                    **geo_info
-                })
-                
-                # Enhance dengan real geolocation tester (user's proven method)
-                try:
-                    from real_geolocation_tester import get_real_geolocation
-                    real_geo = get_real_geolocation(account)
-                    if real_geo:
-                        # Update dengan real location data
-                        result.update(real_geo)
-                        print(f"✅ Real geolocation: {real_geo['Country']} - {real_geo['Provider']}")
-                    else:
-                        print("⚠️  Real geolocation failed, using basic lookup")
-                except ImportError:
-                    print("⚠️  Real geolocation tester not available, using basic lookup")
-                
-                # USER REQUEST: Progressive updates - update live_results with success status
+        for (test_ip, test_port, source_label, sni_for_tls) in targets:
+            result['TimeoutCount'] = 0
+            for attempt in range(MAX_RETRIES):
+                if result['TimeoutCount'] > 0:
+                    result['Status'] = f'Timeout Retry {result["TimeoutCount"]}/3'
+                else:
+                    result['Status'] = '🔄'
+                result['Retry'] = attempt
                 if live_results is not None:
                     live_results[index].update(result)
-                    print(f"✅ DEBUG: Account {index} completed successfully with status: {result['Status']}")
-                return result
-            else:
-                # Connection failed - could be timeout or other error
-                result['TimeoutCount'] += 1
-                print(f"⚠️ Account {index+1} timeout {result['TimeoutCount']}/3 (attempt {attempt+1})")
+                    await asyncio.sleep(0.05)
 
-            # USER REQUEST: After 3 timeouts, mark as dead and stop retrying
-            if result['TimeoutCount'] >= timeout_retries:
-                result.update({
-                    "Status": "Dead",
-                    "Latency": "Dead", 
-                    "TestType": "Dead Connection",
-                    "ICMP": "Dead"
-                })
-                print(f"💀 Account {index+1} marked as DEAD after {timeout_retries} timeouts")
-                if live_results is not None:
-                    live_results[index].update(result)
-                    print(f"💀 DEBUG: Account {index} marked as DEAD with status: {result['Status']}")
-                return result
+                is_conn, latency = is_alive(test_ip, test_port, timeout=5)
+                if is_conn:
+                    # Optional TLS check if TLS enabled
+                    tls_cfg = account.get('tls', {}) if isinstance(account.get('tls'), dict) else {}
+                    tls_enabled = bool(tls_cfg.get('enabled'))
+                    tls_ok = True
+                    if tls_enabled and sni_for_tls:
+                        try:
+                            context = ssl.create_default_context()
+                            with socket.create_connection((test_ip, test_port), timeout=5) as raw_sock:
+                                with context.wrap_socket(raw_sock, server_hostname=sni_for_tls) as tls_sock:
+                                    # Handshake happens on wrap
+                                    tls_ok = True
+                        except Exception:
+                            tls_ok = False
+                    if tls_enabled and not tls_ok:
+                        # Mark as TLSFail and try next target
+                        print(f"TLSFail for {sni_for_tls}@{test_ip}:{test_port}")
+                        break
 
-            if attempt < MAX_RETRIES - 1:
-                result['Status'] = '🔁'
-                if live_results is not None:
-                    live_results[index].update(result)
-                    await asyncio.sleep(0)
-                await asyncio.sleep(RETRY_DELAY)
+                    geo_info = geoip_lookup(test_ip)
+                    result.update({
+                        "Status": "✅",
+                        "TestType": f"{source_label.upper()} TCP",
+                        "Tested IP": test_ip,
+                        "Latency": latency,
+                        "Jitter": 0,
+                        "ICMP": "✔",
+                        **geo_info
+                    })
+                    try:
+                        from real_geolocation_tester import get_real_geolocation
+                        real_geo = get_real_geolocation(account)
+                        if real_geo:
+                            result.update(real_geo)
+                    except ImportError:
+                        pass
+                    if live_results is not None:
+                        live_results[index].update(result)
+                    return result
+                else:
+                    result['TimeoutCount'] += 1
+                if result['TimeoutCount'] >= timeout_retries:
+                    break
+                # small delay before retry
+                if attempt < MAX_RETRIES - 1:
+                    result['Status'] = '🔁'
+                    if live_results is not None:
+                        live_results[index].update(result)
+                        await asyncio.sleep(0)
+                    await asyncio.sleep(RETRY_DELAY)
 
-        # Fallback ping jika TCP gagal semua
+        # Fallback ping jika TCP gagal untuk semua target
+        # Pilih IP pertama dari targets untuk ping fallback
+        fallback_ip = targets[0][0]
         for attempt in range(MAX_RETRIES):
             result['Status'] = '🔄'
             result['Retry'] = attempt
             if live_results is not None:
                 live_results[index].update(result)
-                await asyncio.sleep(0)  # yield to event loop
+                await asyncio.sleep(0)
 
-            stats = get_network_stats(test_ip)
+            stats = get_network_stats(fallback_ip)
             if stats.get("Latency") != -1:
-                geo_info = geoip_lookup(test_ip)
+                geo_info = geoip_lookup(fallback_ip)
                 result.update({
                     "Status": "✅",
-                    "TestType": f"{test_source.upper()} Ping",
-                    "Tested IP": test_ip,
+                    "TestType": f"{targets[0][2].upper()} Ping",
+                    "Tested IP": fallback_ip,
                     **stats,
                     **geo_info
                 })
-                
-                # Enhance dengan real geolocation tester (user's proven method)
                 try:
                     from real_geolocation_tester import get_real_geolocation
                     real_geo = get_real_geolocation(account)
                     if real_geo:
-                        # Update dengan real location data
                         result.update(real_geo)
-                        print(f"✅ Real geolocation: {real_geo['Country']} - {real_geo['Provider']}")
-                    else:
-                        print("⚠️  Real geolocation failed, using basic lookup")
                 except ImportError:
-                    print("⚠️  Real geolocation tester not available, using basic lookup")
-                
-                # Update live_results
+                    pass
                 if live_results is not None:
                     live_results[index].update(result)
                 return result
 
             if attempt < MAX_RETRIES - 1:
                 result['Status'] = '🔁'
-                result['Retry'] = attempt+1
+                result['Retry'] = attempt + 1
                 if live_results is not None:
                     live_results[index].update(result)
                     await asyncio.sleep(0)

@@ -11,6 +11,7 @@ import tempfile
 import subprocess
 from dotenv import load_dotenv
 from urllib.parse import urlparse
+from io import BytesIO
 
 # Import existing modules
 from github_client import GitHubClient
@@ -575,12 +576,9 @@ def download_config():
     timestamp = datetime.now().strftime("%Y%m%d-%H%M")
     filename = f"VortexVpn-{timestamp}.json"
     
-    # Create temporary file
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
-        f.write(session_data['final_config'])
-        temp_path = f.name
-    
-    return send_file(temp_path, as_attachment=True, download_name=filename, mimetype='application/json')
+    mem = BytesIO(session_data['final_config'].encode('utf-8'))
+    mem.seek(0)
+    return send_file(mem, as_attachment=True, download_name=filename, mimetype='application/json')
 
 @app.route('/api/upload-to-github', methods=['POST'])
 def upload_to_github():

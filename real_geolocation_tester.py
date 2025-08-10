@@ -20,7 +20,12 @@ class RealGeolocationTester:
         self.test_url = 'https://www.google.com'
         self.geo_api_url = 'http://ip-api.com/json'
         self.timeout_seconds = 15
-        self.xray_path = './xray'  # Adjust path as needed
+        self.xray_path = os.getenv('XRAY_PATH') or './xray'
+        self.geo_endpoints = [
+            ('ip-api', 'http://ip-api.com/json'),
+            ('ipinfo', 'https://ipinfo.io/json'),
+            ('cf-trace', 'https://www.cloudflare.com/cdn-cgi/trace')
+        ]
         
     def extract_real_ip_from_path(self, path):
         """Extract IP dari path seperti metode user"""
@@ -791,44 +796,79 @@ class RealGeolocationTester:
                 # Test connection
                 proxy_arg = f"http://127.0.0.1:{self.local_http_port}"
                 start_time = time.monotonic()
-                
-                subprocess.run(
-                    ['curl', '-s', '-I', self.test_url, '--proxy', proxy_arg, 
+                head = subprocess.run(
+                    ['curl', '-s', '-I', self.test_url, '--proxy', proxy_arg,
                      '--connect-timeout', str(self.timeout_seconds)],
-                    check=True, capture_output=True, timeout=self.timeout_seconds + 2
+                    capture_output=True, timeout=self.timeout_seconds + 2
                 )
-                
+                connect_ok = head.returncode == 0
                 end_time = time.monotonic()
                 latency_ms = (end_time - start_time) * 1000
-                
-                # Get real IP via proxy
-                geo_result = subprocess.run(
-                    ['curl', '-s', self.geo_api_url, '--proxy', proxy_arg],
-                    capture_output=True, text=True, timeout=10
-                )
-                
-                if geo_result.returncode == 0:
-                    geo_data = json.loads(geo_result.stdout)
+
+                # Collect geo from multiple endpoints
+                votes = []
+                ip_seen = None
+                for name, url in self.geo_endpoints:
+                    try:
+                        res = subprocess.run(
+                            ['curl', '-s', url, '--proxy', proxy_arg],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if res.returncode != 0:
+                            continue
+                        if name == 'cf-trace':
+                            # Parse key=value lines
+                            data = {}
+                            for line in res.stdout.splitlines():
+                                if '=' in line:
+                                    k, v = line.split('=', 1)
+                                    data[k.strip()] = v.strip()
+                            ip = data.get('ip')
+                            colo = data.get('colo')
+                            if ip:
+                                votes.append({'ip': ip, 'provider': data.get('loc', ''), 'country': data.get('loc', '')})
+                                ip_seen = ip_seen or ip
+                        else:
+                            data = json.loads(res.stdout)
+                            if name == 'ip-api':
+                                votes.append({'ip': data.get('query'), 'provider': data.get('org') or data.get('isp'), 'country': data.get('countryCode')})
+                                ip_seen = ip_seen or data.get('query')
+                            elif name == 'ipinfo':
+                                votes.append({'ip': data.get('ip'), 'provider': data.get('org'), 'country': (data.get('country') or '').upper()})
+                                ip_seen = ip_seen or data.get('ip')
+                    except Exception:
+                        continue
+
+                def majority(key):
+                    from collections import Counter
+                    vals = [v.get(key) for v in votes if v.get(key)]
+                    return Counter(vals).most_common(1)[0][0] if vals else None
+
+                country = majority('country') or 'N/A'
+                provider = majority('provider') or 'N/A'
+                ip_final = majority('ip') or ip_seen or 'N/A'
+
+                if connect_ok and ip_final != 'N/A':
                     return {
                         'success': True,
-                        'country': geo_data.get('countryCode', 'N/A'),
-                        'country_name': geo_data.get('country', 'N/A'),
-                        'isp': geo_data.get('isp', 'N/A'),
-                        'org': geo_data.get('org', 'N/A'),
-                        'ip': geo_data.get('query', 'N/A'),
+                        'country': country,
+                        'country_name': country,
+                        'isp': provider,
+                        'org': provider,
+                        'ip': ip_final,
                         'method': 'VPN Proxy',
                         'latency': latency_ms
                     }
-                
+ 
             finally:
                 # Cleanup
                 if 'xray_process' in locals():
                     xray_process.kill()
                 os.unlink(temp_config)
-                
+             
         except Exception as e:
             return {'success': False, 'error': str(e), 'method': 'proxy'}
-        
+         
         return {'success': False, 'error': 'Connection failed', 'method': 'proxy'}
 
 # Integration function untuk existing tester
