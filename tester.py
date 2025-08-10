@@ -182,32 +182,62 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                     transport = account.get('transport', {}) if isinstance(account.get('transport'), dict) else {}
                     is_ws = (transport.get('type') == 'ws')
                     if is_ws:
-                        try:
-                            host_header = None
-                            headers = transport.get('headers', {}) if isinstance(transport.get('headers'), dict) else {}
-                            host_header = headers.get('Host') or sni_for_tls
-                            # Build HTTP Upgrade request
-                            conn = http.client.HTTPSConnection(test_ip, test_port, timeout=5, context=ssl.create_default_context()) if tls_enabled else http.client.HTTPConnection(test_ip, test_port, timeout=5)
-                            path = transport.get('path') or '/'
-                            conn.putrequest('GET', path)
-                            if host_header:
-                                conn.putheader('Host', host_header)
-                            conn.putheader('Upgrade', 'websocket')
-                            conn.putheader('Connection', 'Upgrade')
-                            conn.putheader('Sec-WebSocket-Key', 'dGhlIHNhbXBsZSBub25jZQ==')
-                            conn.putheader('Sec-WebSocket-Version', '13')
-                            conn.endheaders()
-                            resp = conn.getresponse()
-                            ws_ok = (resp.status == 101)
-                        except Exception:
-                            ws_ok = False
-                        finally:
+                        headers = transport.get('headers', {}) if isinstance(transport.get('headers'), dict) else {}
+                        host_header = headers.get('Host') or sni_for_tls
+                        path = transport.get('path') or '/'
+                        # Only attempt WS probe if we have a hostname for SNI/Host
+                        if tls_enabled and host_header:
                             try:
-                                conn.close()
+                                raw = socket.create_connection((test_ip, test_port), timeout=5)
+                                try:
+                                    ctx = ssl.create_default_context()
+                                    tls_sock = ctx.wrap_socket(raw, server_hostname=host_header)
+                                    req = (
+                                        f"GET {path} HTTP/1.1\r\n"
+                                        f"Host: {host_header}\r\n"
+                                        "Upgrade: websocket\r\n"
+                                        "Connection: Upgrade\r\n"
+                                        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                                        "Sec-WebSocket-Version: 13\r\n\r\n"
+                                    )
+                                    tls_sock.sendall(req.encode('utf-8'))
+                                    resp = tls_sock.recv(256).decode('latin-1', 'ignore')
+                                    ws_ok = (resp.startswith('HTTP/1.1 101') or resp.startswith('HTTP/2 101'))
+                                finally:
+                                    try:
+                                        tls_sock.close()
+                                    except Exception:
+                                        pass
                             except Exception:
-                                pass
+                                ws_ok = False
+                        elif not tls_enabled and host_header:
+                            try:
+                                raw = socket.create_connection((test_ip, test_port), timeout=5)
+                                try:
+                                    req = (
+                                        f"GET {path} HTTP/1.1\r\n"
+                                        f"Host: {host_header}\r\n"
+                                        "Upgrade: websocket\r\n"
+                                        "Connection: Upgrade\r\n"
+                                        "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n"
+                                        "Sec-WebSocket-Version: 13\r\n\r\n"
+                                    )
+                                    raw.sendall(req.encode('utf-8'))
+                                    resp = raw.recv(256).decode('latin-1', 'ignore')
+                                    ws_ok = resp.startswith('HTTP/1.1 101')
+                                finally:
+                                    try:
+                                        raw.close()
+                                    except Exception:
+                                        pass
+                            except Exception:
+                                ws_ok = False
+                        else:
+                            # No host header/SNI: skip WS probe to avoid false negative
+                            ws_ok = True
                     if is_ws and not ws_ok:
-                        print(f"WSFail for {sni_for_tls or host_header}@{test_ip}:{test_port}")
+                        print(f"WSFail for {host_header or sni_for_tls}@{test_ip}:{test_port}")
+                        # try next target instead of failing total
                         break
 
                     geo_info = geoip_lookup(test_ip)
