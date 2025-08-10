@@ -377,10 +377,12 @@ async function setupGitHub() {
     
     try {
         // USER REQUEST: Save GitHub config to database
-        const csrf = document.querySelector('meta[name="csrf-token"]').content;
+        const csrf = document.querySelector('meta[name="csrf-token"]')?.content;
         const headers = {
             'Content-Type': 'application/json',
-            'X-CSRF-Token': csrf
+        };
+        if (csrf) {
+            headers['X-CSRF-Token'] = csrf;
         };
         const response = await fetch('/api/save-github-config', {
             method: 'POST',
@@ -627,7 +629,7 @@ async function addLinksAndTest() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRF-Token': csrf
+                ...(document.querySelector('meta[name="csrf-token"]')?.content ? {'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content} : {})
             },
             body: JSON.stringify({ links: inputText })
         });
@@ -1311,7 +1313,7 @@ async function downloadConfiguration() {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'X-CSRF-Token': csrf
+                ...(document.querySelector('meta[name="csrf-token"]')?.content ? {'X-CSRF-Token': document.querySelector('meta[name="csrf-token"]').content} : {})
             },
             body: JSON.stringify({ custom_servers: customServers })
         });

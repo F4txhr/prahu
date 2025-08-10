@@ -46,10 +46,13 @@ origins = [o.strip() for o in os.getenv('ALLOWED_ORIGINS', '*').split(',') if o.
 socketio = SocketIO(app, cors_allowed_origins=origins if origins else '*', async_mode='threading')
 
 API_KEY = os.getenv('API_KEY')
+CSRF_ENABLED = os.getenv('CSRF_ENABLED', 'false').lower() == 'true'
 
 # CSRF protection
 @app.before_request
 def csrf_protect():
+    if not CSRF_ENABLED:
+        return
     if request.method == 'POST' and request.path.startswith('/api/'):
         token = request.headers.get('X-CSRF-Token')
         sess_token = session.get('csrf_token')
