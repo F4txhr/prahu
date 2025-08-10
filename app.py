@@ -20,7 +20,7 @@ from core import (
 )
 from extractor import extract_accounts_from_config
 from converter import parse_link, inject_outbounds_to_template
-from database import save_github_config, get_github_config, save_test_session, get_latest_test_session
+from database import save_github_config as db_save_github_config, get_github_config as db_get_github_config, save_test_session, get_latest_test_session
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your-secret-key-here'
@@ -103,7 +103,7 @@ def index():
     return render_template('index.html')
 
 @app.route('/api/setup-github', methods=['POST'])
-def setup_github():
+def setup_github():  # legacy endpoint, superseded by save_github_config
     data = request.json
     token = data.get('token')
     owner = data.get('owner')
@@ -111,7 +111,7 @@ def setup_github():
     
     if token and owner and repo:
         # Save to local database
-        save_github_config(token, owner, repo)
+        db_save_github_config(token, owner, repo)
         session_data['github_client'] = GitHubClient(token, owner, repo)
         return jsonify({'success': True, 'message': 'GitHub configured and saved locally'})
     else:
@@ -528,7 +528,7 @@ def generate_config():
         custom_servers_input = data.get('custom_servers', '').strip()
         
         # Get successful accounts
-        successful_accounts = [res for res in session_data['test_results'] if res["Status"] == "●"]
+        successful_accounts = [res for res in session_data['test_results'] if res["Status"] == "✅"]
         
         if not successful_accounts:
             return jsonify({'success': False, 'message': 'No successful accounts to generate config'})
@@ -605,7 +605,7 @@ def upload_to_github():
         )
         
         if result:
-            return jsonify({'success': True, 'message': f'Successfully uploaded to {upload_path}'})
+            return jsonify({'success': True, 'message': f'Successfully uploaded to {upload_path}', 'path': upload_path})
         else:
             return jsonify({'success': False, 'message': 'Failed to upload to GitHub'})
     
@@ -674,7 +674,7 @@ def load_template_config():
         })
 
 @app.route('/api/get-github-config')
-def get_github_config():
+def get_github_config_route():
     """USER REQUEST: Get saved GitHub config from database for auto-fill"""
     try:
         # Simple file-based storage for GitHub config
@@ -704,7 +704,7 @@ def get_github_config():
         })
 
 @app.route('/api/save-github-config', methods=['POST'])
-def save_github_config():
+def save_github_config_route():
     """USER REQUEST: Save GitHub config to database with token persistence"""
     try:
         data = request.json
@@ -729,6 +729,10 @@ def save_github_config():
         with open(config_file, 'w') as f:
             json.dump(github_config, f, indent=2)
         
+        # Initialize GitHub client in session for immediate use
+        session_data['github_client'] = GitHubClient(token, owner, repo)
+        session_data['github_path'] = None
+        session_data['github_sha'] = None
         return jsonify({
             'success': True,
             'message': 'GitHub configuration saved successfully'
