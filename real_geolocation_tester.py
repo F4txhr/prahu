@@ -11,6 +11,53 @@ import tempfile
 import os
 import re
 from utils import geoip_lookup
+import urllib.request
+import platform
+
+def ensure_xray_available(dest_path: str | None = None) -> str | None:
+    """Try to download Xray for current platform and chmod +x. Returns path if available."""
+    dest = dest_path or os.getenv('XRAY_PATH') or './xray'
+    if os.path.exists(dest):
+        try:
+            os.chmod(dest, 0o755)
+        except Exception:
+            pass
+        return dest
+    # naive platform mapping
+    sys_os = platform.system().lower()
+    arch = platform.machine().lower()
+    # map to xray-core release asset name (simplified common cases)
+    if 'linux' in sys_os:
+        if arch in ('x86_64','amd64'):
+            asset = 'Xray-linux-64.zip'
+        elif arch in ('aarch64','arm64'):
+            asset = 'Xray-linux-arm64-v8a.zip'
+        else:
+            asset = 'Xray-linux-64.zip'
+    elif 'darwin' in sys_os:
+        asset = 'Xray-macos-64.zip'
+    elif 'windows' in sys_os:
+        asset = 'Xray-windows-64.zip'
+    else:
+        return None
+    url = f"https://github.com/XTLS/Xray-core/releases/latest/download/{asset}"
+    try:
+        tmp_zip = dest + '.zip'
+        urllib.request.urlretrieve(url, tmp_zip)
+        import zipfile
+        with zipfile.ZipFile(tmp_zip, 'r') as zf:
+            # extract xray binary inside archive (name varies 'xray' or 'xray.exe')
+            member = next((m for m in zf.namelist() if m.endswith('xray') or m.endswith('xray.exe')), None)
+            if not member:
+                return None
+            zf.extract(member, os.path.dirname(dest) or '.')
+            extracted = os.path.join(os.path.dirname(dest) or '.', member)
+            os.rename(extracted, dest)
+        os.remove(tmp_zip)
+        os.chmod(dest, 0o755)
+        return dest
+    except Exception:
+        return None
 
 class RealGeolocationTester:
     """Test VPN dengan actual connection untuk mendapatkan ISP asli"""
@@ -776,8 +823,12 @@ class RealGeolocationTester:
     def _test_with_actual_vpn_connection(self, account):
         """Test dengan actual VPN connection seperti metode user"""
         if not os.path.exists(self.xray_path):
-            print(f"⚠️  Xray not found at {self.xray_path}, skipping proxy test")
-            return {'success': False, 'error': 'Xray not available', 'method': 'proxy'}
+            # attempt auto-download
+            downloaded = ensure_xray_available(self.xray_path)
+            if not downloaded or not os.path.exists(downloaded):
+                print(f"⚠️  Xray not found at {self.xray_path}, skipping proxy test")
+                return {'success': False, 'error': 'Xray not available', 'method': 'proxy'}
+            self.xray_path = downloaded
         
         try:
             # limit concurrency
