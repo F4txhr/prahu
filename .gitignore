@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.dist/
+build/
+
+a/.venv/
+.venv/
+venv/
+ENV/
+
+# OS / tooling
+.DS_Store
+*.log
+.coverage
+.pytest_cache/
+
+# App data
+vortexvpn.db
+.env
+
+# Binaries
+xray
+xray.exe
+
+# Node/web artifacts (if any)
+node_modules/
