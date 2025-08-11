@@ -90,7 +90,8 @@ function initSocket() {
       const total = getTotalValue(data);
       const completed = data.completed ?? data.results?.filter(r => !['WAIT','🔄','🔁'].includes(r.Status)).length ?? 0;
       setProgress(completed, total);
-      renderRows(data.results || []);
+      // Replace rows on each update to avoid duplicates
+      renderRows(data.results || [], true);
     } catch (err) { console.error(err); }
   });
   socket.on('testing_complete', data => {
