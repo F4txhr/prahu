@@ -1622,18 +1622,19 @@ function getAdvancedSelections() {
 }
 
 function buildAdvancedUrls() {
-    const { selectedTypes, countries, tls, wildcard, limit } = getAdvancedSelections();
+    const { selectedTypes, bugs, countries, tls, wildcard, limit } = getAdvancedSelections();
 
     const typesPool = selectedTypes.length > 0 ? selectedTypes : ADV_SUPPORTED_TYPES;
     const countryPool = (countries.length > 0) ? countries : ['random'];
+    const bugPool = (bugs.length > 0) ? bugs : ['MASUKAN+BUG'];
 
     const urls = [];
-    countryPool.forEach((country) => {
+    countryPool.forEach((country, idx) => {
+        const bug = bugPool[idx % bugPool.length];
         typesPool.forEach((type) => {
             const params = new URLSearchParams();
             params.set('type', type);
-            // Bug random only per requirement
-            params.set('bug', 'random');
+            params.set('bug', bug);
             params.set('tls', tls);
             params.set('wildcard', wildcard);
             params.set('limit', String(limit));
