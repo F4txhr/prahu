@@ -248,6 +248,61 @@ https://pastebin.com/raw/ABC123
                     </div>
                 </div>
 
+                <!-- Advanced (Auto Fetch) - hidden by default -->
+                <div class="card">
+                    <div class="card-header" style="display:flex; align-items:center; gap:8px;">
+                        <h3 style="margin:0;">🔧 Advanced (Auto Fetch)</h3>
+                        <button class="btn" id="toggle-advanced">Show</button>
+                    </div>
+                    <div class="card-content" id="advanced-panel" style="display:none;">
+                        <div class="form-group">
+                            <label>Types (multi-select)</label>
+                            <div style="display:flex; gap:12px; flex-wrap:wrap;">
+                                <label><input type="checkbox" class="adv-type" value="vless"> vless</label>
+                                <label><input type="checkbox" class="adv-type" value="vmess"> vmess</label>
+                                <label><input type="checkbox" class="adv-type" value="trojan" checked> trojan</label>
+                                <label><input type="checkbox" class="adv-type" value="ss"> ss</label>
+                            </div>
+                            <small>Pilih satu atau lebih. Jika kosong nanti akan diacak dari 4 jenis tersebut.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="adv-bugs">Bugs (SNI/Host) - pisah koma atau baris</label>
+                            <textarea id="adv-bugs" rows="3" placeholder="quiz.int.vidio.com, example.com"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="adv-countries">Countries - pisah koma atau baris</label>
+                            <textarea id="adv-countries" rows="2" placeholder="sg, id, jp, random"></textarea>
+                        </div>
+                        <div class="form-group" style="display:flex; gap:16px; flex-wrap:wrap;">
+                            <div>
+                                <label for="adv-tls">TLS</label>
+                                <select id="adv-tls">
+                                    <option value="true" selected>true</option>
+                                    <option value="false">false</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="adv-wildcard">Wildcard</label>
+                                <select id="adv-wildcard">
+                                    <option value="false" selected>false</option>
+                                    <option value="true">true</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="adv-limit">Limit</label>
+                                <input id="adv-limit" type="number" value="10" min="1" max="100" style="width:100px;">
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <small id="adv-preview-info">No preview</small>
+                        </div>
+                        <div class="button-group">
+                            <button class="btn" id="adv-preview-btn">Preview</button>
+                            <button class="btn btn-success" id="adv-fetch-add-btn">Fetch & Add (Advanced)</button>
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Server Replacement -->
                 <div class="card">
                     <div class="card-header">

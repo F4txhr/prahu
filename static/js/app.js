@@ -253,6 +253,21 @@ function setupFormHandlers() {
     
     // Upload to GitHub
     document.getElementById('upload-github-btn').addEventListener('click', uploadToGitHub);
+
+    // Advanced (Auto Fetch) handlers
+    const toggleBtn = document.getElementById('toggle-advanced');
+    const advPanel = document.getElementById('advanced-panel');
+    if (toggleBtn && advPanel) {
+        toggleBtn.addEventListener('click', () => {
+            const show = advPanel.style.display === 'none';
+            advPanel.style.display = show ? 'block' : 'none';
+            toggleBtn.textContent = show ? 'Hide' : 'Show';
+        });
+    }
+    const advPreviewBtn = document.getElementById('adv-preview-btn');
+    const advFetchAddBtn = document.getElementById('adv-fetch-add-btn');
+    if (advPreviewBtn) advPreviewBtn.addEventListener('click', previewAdvancedUrls);
+    if (advFetchAddBtn) advFetchAddBtn.addEventListener('click', fetchAndAddAdvanced);
 }
 
 // Get selected testing mode
