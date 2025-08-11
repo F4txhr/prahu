@@ -474,8 +474,29 @@ https://pastebin.com/raw/ABC123
                         <div class="card" id="results-summary" style="display:none;">
                             <div class="card-header"><h3>Summary</h3></div>
                             <div class="card-content">
-                                <div class="summary-stats"></div>
+                                <div class="summary-stats">
+                                    <div class="summary-item">
+                                        <span class="summary-value" id="summary-successful">0</span>
+                                        <span class="summary-label">Successful</span>
+                                    </div>
+                                    <div class="summary-item">
+                                        <span class="summary-value" id="summary-failed">0</span>
+                                        <span class="summary-label">Failed</span>
+                                    </div>
+                                    <div class="summary-item">
+                                        <span class="summary-value" id="summary-avg-latency">0ms</span>
+                                        <span class="summary-label">Avg Latency</span>
+                                    </div>
+                                </div>
                                 <div id="export-buttons" style="margin-top:12px;"></div>
+                            </div>
+                        </div>
+
+                        <!-- Detailed Results (hidden, used by JS) -->
+                        <div class="card" id="detailed-results" style="display:none;">
+                            <div class="card-header"><h3>Detailed Results</h3></div>
+                            <div class="card-content">
+                                <div id="results-table"></div>
                             </div>
                         </div>
 
