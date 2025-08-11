@@ -1714,7 +1714,9 @@ async function fetchAndAddAdvanced() {
 
         if (!data.success) {
             showToast('Advanced Fetch Failed', data.message || 'Unknown error', 'error');
-            updateStatus('Advanced fetch failed', 'error');
+            updateStatus('Advanced fetch failed - falling back to Smart Process', 'warning');
+            // Fallback: use Smart VPN Input flow automatically
+            await addLinksAndTest();
             return;
         }
 
@@ -1738,7 +1740,9 @@ async function fetchAndAddAdvanced() {
     } catch (e) {
         console.error('Advanced fetch error:', e);
         showToast('Error', 'Failed to fetch and add advanced URLs', 'error');
-        updateStatus('Advanced fetch failed', 'error');
+        updateStatus('Advanced fetch failed - falling back to Smart Process', 'warning');
+        // Fallback: use Smart VPN Input flow automatically
+        await addLinksAndTest();
     }
 }
 
