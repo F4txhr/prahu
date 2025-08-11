@@ -15,6 +15,7 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 </head>
 <body>
+    <div class="bg-animated" aria-hidden="true"></div>
     <!-- Loading Screen -->
     <div id="loading-screen" class="loading-screen">
         <div class="loading-content">
@@ -49,7 +50,9 @@
 
         <!-- Content Sections -->
         <main class="main">
-            <!-- Configuration Setup - USER REQUEST: Single page layout dengan setup options -->
+            <div class="layout">
+                <div class="left-col">
+                    <!-- Configuration Setup - USER REQUEST: Single page layout dengan setup options -->
             <div class="page-section">
                 <div class="section-header">
                     <h2>🔧 Configuration Setup</h2>
@@ -347,224 +350,112 @@ https://pastebin.com/raw/ABC123
                     </div>
                 </div>
 
-
-
-                <!-- Quick Stats -->
-                <div class="card" id="quick-stats" style="display: none;">
-                    <div class="card-header">
-                        <h3>Quick Summary</h3>
-                    </div>
-                    <div class="card-content">
-                        <div class="stats-grid">
-                            <div class="stat-item">
-                                <span class="stat-value" id="total-accounts">0</span>
-                                <span class="stat-label">Total Added</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-value" id="test-status">⏳</span>
-                                <span class="stat-label">Status</span>
-                            </div>
+                </div> <!-- end left-col -->
+                <div class="right-col">
+                    <div class="status-bar">
+                        <div class="status-line">
+                            <span id="status-summary">Testing status will appear here…</span>
                         </div>
+                        <div class="progress-bar"><div id="progress-fill" style="width:0%"></div></div>
                     </div>
-                </div>
-            </div>
 
-            <!-- Live Testing Section -->
-            <div class="page-section">
-                <div class="section-header">
-                    <h2>📊 Live Testing Progress</h2>
-                    <p>Real-time VPN connection testing results</p>
-                </div>
-
-                <!-- Progress -->
-                <div class="card" id="testing-progress" style="display: none;">
-                    <div class="card-header">
-                        <h3>Testing Progress</h3>
-                    </div>
-                    <div class="card-content">
-                        <div class="progress-info">
-                            <span id="progress-text">0 / 0 accounts tested</span>
-                            <span id="progress-percent">0%</span>
+                    <!-- Quick Stats -->
+                    <div class="card" id="quick-stats" style="display: none;">
+                        <div class="card-header">
+                            <h3>Quick Summary</h3>
                         </div>
-                        <div class="progress-bar">
-                            <div class="progress-fill" id="progress-fill"></div>
-                        </div>
-                        <div class="test-stats">
-                            <div class="test-stat-item success">
-                                <span id="successful-count">0</span>
-                                <span>✅ Success</span>
-                            </div>
-                            <div class="test-stat-item failed">
-                                <span id="failed-count">0</span>
-                                <span>❌ Failed</span>
-                            </div>
-                            <div class="test-stat-item testing">
-                                <span id="testing-count">0</span>
-                                <span>🔄 Testing</span>
+                        <div class="card-content">
+                            <div class="stats-grid">
+                                <div class="stat-item">
+                                    <span class="stat-value" id="total-accounts">0</span>
+                                    <span class="stat-label">Total Added</span>
+                                </div>
+                                <div class="stat-item">
+                                    <span class="stat-value" id="test-status">⏳</span>
+                                    <span class="stat-label">Status</span>
+                                </div>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Live Results Table -->
-                <div class="card" id="live-results" style="display: none;">
-                    <div class="card-header">
-                        <h3>Live Test Results</h3>
-                        <small>Updated in real-time</small>
-                    </div>
-                    <div class="card-content">
-                        <div class="testing-table-container">
-                            <table class="testing-table" id="testing-table">
-                                <thead>
-                                    <tr>
-                                        <th class="order-header">No</th>
-                                        <th class="type-header">Type</th>
-                                        <th class="country-header">Country</th>
-                                        <th class="provider-header">Provider</th>
-                                        <th class="ip-header">IP</th>
-                                        <th class="latency-header">Latency</th>
-                                        <th class="jitter-header">Jitter</th>
-                                        <th class="icmp-header">ICMP</th>
-                                        <th class="status-header">Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="testing-table-body">
-                                    <!-- Results will be populated here -->
-                                </tbody>
-                            </table>
+                    <!-- Live Testing Section -->
+                    <div class="page-section">
+                        <div class="section-header">
+                            <h2>📊 Live Testing Progress</h2>
+                            <p>Real-time VPN connection testing results</p>
                         </div>
-                    </div>
-                </div>
 
-                <!-- Auto-generated Config Notification -->
-                <div class="card" id="config-notification" style="display: none;">
-                    <div class="card-header">
-                        <h3>✅ Configuration Generated!</h3>
-                    </div>
-                    <div class="card-content">
-                        <p>Your VPN configuration has been automatically generated and is ready for download or upload to GitHub.</p>
-                        <div class="notification-actions">
-                            <button class="btn btn-primary" onclick="switchSection('export')">
-                                📥 Go to Download/Upload
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Results Section -->
-            <div class="page-section">
-                <div class="section-header">
-                    <h2>Test Results</h2>
-                    <p>View detailed results and successful connections</p>
-                </div>
-
-                <!-- Results Summary -->
-                <div class="card" id="results-summary" style="display: none;">
-                    <div class="card-header">
-                        <h3>Summary</h3>
-                    </div>
-                    <div class="card-content">
-                        <div class="summary-stats">
-                            <div class="summary-item">
-                                <span class="summary-value" id="summary-successful">0</span>
-                                <span class="summary-label">Successful</span>
+                        <!-- Progress -->
+                        <div class="card" id="testing-progress" style="display: none;">
+                            <div class="card-header">
+                                <h3>Testing Progress</h3>
                             </div>
-                            <div class="summary-item">
-                                <span class="summary-value" id="summary-failed">0</span>
-                                <span class="summary-label">Failed</span>
-                            </div>
-                            <div class="summary-item">
-                                <span class="summary-value" id="summary-avg-latency">0ms</span>
-                                <span class="summary-label">Avg Latency</span>
+                            <div class="card-content">
+                                <div class="progress-info">
+                                    <span id="progress-text">0 / 0 accounts tested</span>
+                                    <span id="progress-percent">0%</span>
+                                </div>
+                                <div class="progress-bar">
+                                    <div class="progress-fill" id="progress-fill"></div>
+                                </div>
+                                <div class="test-stats">
+                                    <div class="test-stat-item success">
+                                        <span id="successful-count">0</span>
+                                        <span>✅ Success</span>
+                                    </div>
+                                    <div class="test-stat-item failed">
+                                        <span id="failed-count">0</span>
+                                        <span>❌ Failed</span>
+                                    </div>
+                                    <div class="test-stat-item testing">
+                                        <span id="testing-count">0</span>
+                                        <span>🔄 Testing</span>
+                                    </div>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </div>
 
-                <!-- Detailed Results -->
-                <div class="card" id="detailed-results" style="display: none;">
-                    <div class="card-header">
-                        <h3>Detailed Results</h3>
-                        <div class="filter-controls">
-                            <select id="filter-status">
-                                <option value="all">All Results</option>
-                                <option value="successful">Successful Only</option>
-                                <option value="failed">Failed Only</option>
-                            </select>
-                        </div>
-                    </div>
-                    <div class="card-content">
-                        <div class="results-table-container">
-                            <div id="results-table"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Download/Upload Section -->
-            <div class="page-section">
-                <div class="section-header">
-                    <h2>⬇️ Download & Upload</h2>
-                    <p>Your configuration has been auto-generated and is ready!</p>
-                </div>
-
-                <!-- Configuration Status -->
-                <div class="card" id="config-status">
-                    <div class="card-header">
-                        <h3>✅ Configuration Ready</h3>
-                        <span class="badge success" id="config-badge">Auto-Generated</span>
-                    </div>
-                    <div class="card-content">
-                        <p>Your VPN configuration has been automatically generated with successful accounts.</p>
-                        <div class="config-info">
-                            <div class="config-stat">
-                                <span class="config-value" id="config-account-count">0</span>
-                                <span class="config-label">Working Accounts</span>
+                        <!-- Live Results Table -->
+                        <div class="card" id="live-results" style="display: none;">
+                            <div class="card-header">
+                                <h3>Live Test Results</h3>
+                                <small>Updated in real-time</small>
                             </div>
-                            <div class="config-stat">
-                                <span class="config-value" id="config-timestamp">-</span>
-                                <span class="config-label">Generated</span>
+                            <div class="card-content">
+                                <div class="testing-table-container">
+                                    <table class="testing-table" id="testing-table">
+                                        <thead>
+                                            <tr>
+                                                <th>#</th>
+                                                <th>Tag</th>
+                                                <th>Type</th>
+                                                <th>Country</th>
+                                                <th>Latency</th>
+                                                <th>Status</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="testing-table-body"></tbody>
+                                    </table>
+                                </div>
                             </div>
                         </div>
-                    </div>
-                </div>
 
-                <!-- Download Options -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3>📥 Download Configuration</h3>
-                    </div>
-                    <div class="card-content">
-                        <button class="btn btn-success btn-large" id="download-config-btn">
-                            <span class="btn-text">⬇️ Download VPN Config</span>
-                            <div class="btn-loader hidden"></div>
-                        </button>
-                        <small>Downloads a sing-box compatible JSON configuration file</small>
-                        <div id="export-buttons" style="margin-top:12px;"></div>
-                    </div>
-                </div>
-
-                <!-- GitHub Upload -->
-                <div class="card" id="github-upload">
-                    <div class="card-header">
-                        <h3>📤 Upload to GitHub</h3>
-                        <span class="badge" id="github-upload-status">Ready</span>
-                    </div>
-                    <div class="card-content">
-                        <div class="form-group">
-                            <label for="commit-message">Commit Message</label>
-                            <input type="text" id="commit-message" value="Update VPN configuration" placeholder="Enter commit message">
+                        <!-- Recent Activity -->
+                        <div class="card" id="recent-activity" style="display: none;">
+                            <div class="card-header">
+                                <h3>Recent Activity</h3>
+                            </div>
+                            <div class="card-content">
+                                <div class="activity-log" id="activity-log"></div>
+                            </div>
                         </div>
-                        <button class="btn btn-primary btn-large" id="upload-github-btn">
-                            <span class="btn-text">⬆️ Upload to GitHub</span>
-                            <div class="btn-loader hidden"></div>
-                        </button>
-                        <small>Uploads the configuration to your GitHub repository</small>
-                    </div>
-                </div>
-            </div>
+                    </div> <!-- end page-section -->
+
+                </div> <!-- end right-col -->
+            </div> <!-- end layout -->
         </main>
+        
+        <button class="fab" id="fab-start" title="Start Testing" style="display:none;">▶</button>
 
         <!-- Toast Notifications -->
         <div id="toast-container" class="toast-container"></div>
