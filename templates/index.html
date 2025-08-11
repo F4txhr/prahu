@@ -7,15 +7,772 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/theme-modern.css') }}">
     <link rel="manifest" href="{{ url_for('static', filename='manifest.json') }}">
     <meta name="theme-color" content="#0D1117">
-    <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Custom CSS Variables for Dark Theme */
+        :root {
+            --primary: #6366f1; /* Indigo 500 */
+            --primary-light: #818cf8; /* Indigo 400 */
+            --primary-dark: #4f46e5; /* Indigo 600 */
+            --secondary: #14b8a6; /* Teal 500 */
+            --dark-1: #0f172a; /* Slate 900 */
+            --dark-2: #1e293b; /* Slate 800 */
+            --dark-3: #334155; /* Slate 700 */
+            --light-1: #f8fafc; /* Slate 50 */
+            --light-2: #e2e8f0; /* Slate 200 */
+            --success: #22c55e; /* Green 500 */
+            --danger: #ef4444; /* Red 500 */
+            --warning: #f59e0b; /* Amber 500 */
+        }
+
+        body {
+            background-color: var(--dark-1);
+            color: var(--light-2);
+            font-family: 'Inter', sans-serif;
+            line-height: 1.6;
+            overflow: hidden; /* Prevent body scroll, content-area will scroll */
+        }
+
+        .gradient-bg {
+            background: linear-gradient(135deg, var(--dark-1) 0%, var(--dark-2) 100%);
+        }
+
+        /* Card Styling */
+        .card {
+            background-color: var(--dark-2);
+            border: 1px solid var(--dark-3);
+            border-radius: 0.75rem; /* rounded-xl */
+            padding: 1.5rem; /* p-6 */
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06); /* shadow-md */
+            transition: all 0.3s ease;
+        }
+
+        .card:hover {
+            border-color: var(--primary-light); /* Subtle hover effect */
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+        }
+
+        .card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .card-header h3 {
+            font-size: 1.25rem; /* text-xl */
+            font-weight: 600; /* font-semibold */
+            color: var(--light-1);
+        }
+
+        .card-content {
+            color: var(--light-2);
+        }
+
+        /* Button Styling */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.75rem 1.5rem; /* py-3 px-6 */
+            border-radius: 0.5rem; /* rounded-lg */
+            font-weight: 500; /* font-medium */
+            cursor: pointer;
+            transition: all 0.2s ease-in-out;
+            white-space: nowrap;
+            border: 1px solid transparent; /* For consistent sizing */
+        }
+
+        .btn-primary {
+            background-color: var(--primary);
+            color: var(--light-1);
+        }
+
+        .btn-primary:hover {
+            background-color: var(--primary-dark);
+            transform: translateY(-1px);
+        }
+
+        .btn-success {
+            background-color: var(--success);
+            color: var(--light-1);
+        }
+
+        .btn-success:hover {
+            background-color: #16a34a; /* Green 600 */
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background-color: var(--dark-3);
+            color: var(--light-2);
+            border-color: var(--dark-3);
+        }
+
+        .btn-secondary:hover {
+            background-color: var(--dark-3);
+            border-color: var(--primary-light);
+            color: var(--light-1);
+        }
+
+        .btn-large {
+            padding: 1rem 2rem;
+            font-size: 1.125rem; /* text-lg */
+        }
+
+        /* Form Elements */
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
+        .form-group label {
+            display: block;
+            font-size: 0.875rem; /* text-sm */
+            font-weight: 500; /* font-medium */
+            margin-bottom: 0.5rem;
+            color: var(--light-2);
+        }
+
+        .input-field, textarea, select {
+            width: 100%;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            background-color: var(--dark-3);
+            border: 1px solid var(--dark-3);
+            color: var(--light-1);
+            font-size: 1rem;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .input-field:focus, textarea:focus, select:focus {
+            outline: none;
+            border-color: var(--primary);
+            box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.5); /* primary with opacity */
+        }
+
+        textarea::placeholder {
+            color: var(--light-2);
+            opacity: 0.6;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px; /* full rounded */
+            font-size: 0.75rem; /* text-xs */
+            font-weight: 600; /* font-semibold */
+            text-transform: uppercase;
+        }
+
+        .badge.success {
+            background-color: rgba(34, 197, 94, 0.2); /* Green 500 with opacity */
+            color: var(--success);
+        }
+
+        .badge.auto-detection {
+            background-color: rgba(99, 102, 241, 0.2); /* Indigo 500 with opacity */
+            color: var(--primary);
+        }
+
+        /* Radio Group */
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+
+        .radio-option {
+            display: flex;
+            align-items: flex-start;
+            cursor: pointer;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--dark-3);
+            background-color: var(--dark-3);
+            transition: all 0.2s ease;
+        }
+
+        .radio-option:hover {
+            background-color: rgba(51, 65, 85, 0.7); /* Slate 700 with opacity */
+            border-color: var(--primary-light);
+        }
+
+        .radio-option input[type="radio"] {
+            display: none;
+        }
+
+        .radio-custom {
+            width: 1.25rem;
+            height: 1.25rem;
+            border-radius: 50%;
+            border: 2px solid var(--light-2);
+            margin-right: 0.75rem;
+            flex-shrink: 0;
+            position: relative;
+            top: 0.125rem; /* Adjust vertical alignment */
+        }
+
+        .radio-option input[type="radio"]:checked + .radio-custom {
+            border-color: var(--primary);
+            background-color: var(--primary);
+        }
+
+        .radio-option input[type="radio"]:checked + .radio-custom::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 0.5rem;
+            height: 0.5rem;
+            border-radius: 50%;
+            background-color: var(--light-1);
+        }
+
+        .radio-label {
+            flex-grow: 1;
+        }
+
+        .radio-label strong {
+            display: block;
+            font-size: 1rem;
+            color: var(--light-1);
+            margin-bottom: 0.25rem;
+        }
+
+        .radio-label small {
+            display: block;
+            font-size: 0.875rem;
+            color: var(--light-2);
+            opacity: 0.8;
+        }
+
+        /* Smart Detection Info */
+        .smart-detection-info {
+            margin-top: 1rem;
+            padding: 1rem;
+            background-color: rgba(99, 102, 241, 0.1); /* Primary with low opacity */
+            border-radius: 0.5rem;
+            border: 1px solid rgba(99, 102, 241, 0.3);
+        }
+
+        .detection-indicator {
+            display: flex;
+            align-items: center;
+            margin-bottom: 0.5rem;
+            color: var(--primary);
+            font-weight: 500;
+        }
+
+        .detection-icon {
+            font-size: 1.25rem;
+            margin-right: 0.5rem;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 1rem;
+            text-align: center;
+        }
+
+        .stat-item {
+            background-color: var(--dark-3);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid var(--dark-3);
+        }
+
+        .stat-value {
+            display: block;
+            font-size: 1.875rem; /* text-3xl */
+            font-weight: 700; /* font-bold */
+            color: var(--primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .stat-label {
+            font-size: 0.875rem; /* text-sm */
+            color: var(--light-2);
+            opacity: 0.8;
+        }
+
+        /* Progress Bar */
+        .progress-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.875rem;
+            margin-bottom: 0.5rem;
+            color: var(--light-2);
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 0.75rem;
+            background-color: var(--dark-3);
+            border-radius: 0.375rem;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            width: 0%;
+            background-color: var(--primary);
+            border-radius: 0.375rem;
+            transition: width 0.3s ease-in-out;
+        }
+
+        .test-stats {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+        }
+
+        .test-stat-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.25rem;
+        }
+
+        .test-stat-item span:first-child {
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+
+        .test-stat-item.success span:first-child { color: var(--success); }
+        .test-stat-item.failed span:first-child { color: var(--danger); }
+        .test-stat-item.testing span:first-child { color: var(--warning); }
+
+        /* Tables */
+        .testing-table-container, .results-table-container {
+            overflow-x: auto;
+            margin-top: 1rem;
+        }
+
+        .testing-table, .results-table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 600px; /* Ensure table doesn't get too small */
+        }
+
+        .testing-table th, .results-table th {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--light-2);
+            background-color: var(--dark-3);
+            border-bottom: 1px solid var(--dark-3);
+        }
+
+        .testing-table td, .results-table td {
+            padding: 0.75rem 1rem;
+            font-size: 0.875rem;
+            color: var(--light-2);
+            border-bottom: 1px solid rgba(51, 65, 85, 0.5); /* Lighter border for rows */
+        }
+
+        .testing-table tbody tr:last-child td, .results-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        .testing-table tbody tr:nth-child(even) {
+            background-color: rgba(30, 41, 59, 0.5); /* Slate 800 with opacity */
+        }
+
+        .testing-table .status-success { color: var(--success); font-weight: 600; }
+        .testing-table .status-failed { color: var(--danger); font-weight: 600; }
+        .testing-table .status-testing { color: var(--warning); font-weight: 600; }
+
+        /* Summary Stats */
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1.5rem;
+            text-align: center;
+        }
+
+        .summary-item {
+            background-color: var(--dark-3);
+            padding: 1.5rem;
+            border-radius: 0.75rem;
+            border: 1px solid var(--dark-3);
+        }
+
+        .summary-value {
+            display: block;
+            font-size: 2.25rem; /* text-4xl */
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 0.5rem;
+        }
+
+        .summary-label {
+            font-size: 1rem;
+            color: var(--light-2);
+            opacity: 0.8;
+        }
+
+        /* Filter Controls */
+        .filter-controls {
+            margin-bottom: 1rem;
+        }
+
+        /* Config Info */
+        .config-info {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 1rem;
+            text-align: center;
+        }
+
+        .config-stat {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .config-value {
+            font-size: 1.875rem;
+            font-weight: 700;
+            color: var(--primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .config-label {
+            font-size: 0.875rem;
+            color: var(--light-2);
+            opacity: 0.8;
+        }
+
+        /* Info Box */
+        .info-box {
+            display: flex;
+            align-items: flex-start;
+            padding: 1rem;
+            background-color: rgba(20, 184, 166, 0.1); /* Teal with low opacity */
+            border-radius: 0.5rem;
+            border: 1px solid rgba(20, 184, 166, 0.3);
+            margin-top: 1rem;
+        }
+
+        .info-icon {
+            font-size: 1.5rem;
+            margin-right: 0.75rem;
+            color: var(--secondary);
+            flex-shrink: 0;
+        }
+
+        .info-text {
+            font-size: 0.875rem;
+            color: var(--light-2);
+        }
+
+        .info-text strong {
+            color: var(--light-1);
+        }
+
+        /* Loading Screen */
+        .loading-screen {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--dark-1);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            z-index: 9999;
+            transition: opacity 0.5s ease;
+        }
+
+        .loading-screen.hidden {
+            opacity: 0;
+            visibility: hidden;
+        }
+
+        .vortex-logo {
+            position: relative;
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+        }
+
+        .vortex-ring {
+            position: absolute;
+            border: 4px solid transparent;
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 1.5s linear infinite;
+        }
+
+        .vortex-ring:nth-child(1) {
+            width: 80px;
+            height: 80px;
+            animation-delay: 0s;
+        }
+
+        .vortex-ring:nth-child(2) {
+            width: 60px;
+            height: 60px;
+            top: 10px;
+            left: 10px;
+            border-top-color: var(--secondary);
+            animation-delay: 0.2s;
+        }
+
+        .vortex-ring:nth-child(3) {
+            width: 40px;
+            height: 40px;
+            top: 20px;
+            left: 20px;
+            border-top-color: var(--primary-dark);
+            animation-delay: 0.4s;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .loading-screen h2 {
+            font-size: 1.8rem;
+            color: var(--light-1);
+            margin-bottom: 10px;
+        }
+
+        .loading-screen p {
+            font-size: 1rem;
+            color: var(--light-2);
+        }
+
+        /* Main App Layout */
+        #app {
+            display: flex;
+            min-height: 100vh;
+            background-color: var(--dark-1);
+        }
+
+        /* Sidebar */
+        .sidebar {
+            width: 250px;
+            background-color: var(--dark-2);
+            border-right: 1px solid var(--dark-3);
+            padding: 1.5rem 1rem;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            position: sticky;
+            top: 0;
+            height: 100vh;
+            overflow-y: auto;
+        }
+
+        .sidebar-logo {
+            display: flex;
+            align-items: center;
+            margin-bottom: 2.5rem;
+            padding: 0 0.5rem;
+        }
+
+        .sidebar-logo .vortex-icon {
+            width: 36px;
+            height: 36px;
+            margin-right: 0.75rem;
+        }
+
+        .sidebar-logo h1 {
+            font-size: 1.6rem;
+            font-weight: 700;
+            color: var(--light-1);
+        }
+
+        .sidebar-nav ul {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .sidebar-nav li {
+            margin-bottom: 0.5rem;
+        }
+
+        .sidebar-nav a {
+            display: flex;
+            align-items: center;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            color: var(--light-2);
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .sidebar-nav a:hover {
+            background-color: var(--dark-3);
+            color: var(--light-1);
+        }
+
+        .sidebar-nav a.active {
+            background-color: var(--primary);
+            color: var(--light-1);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .sidebar-nav a.active:hover {
+            background-color: var(--primary-dark);
+        }
+
+        .sidebar-nav a svg {
+            margin-right: 0.75rem;
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Main Content Area */
+        .content-area {
+            flex-grow: 1;
+            display: flex;
+            flex-direction: column;
+            overflow-y: auto; /* Allow content to scroll */
+        }
+
+        .main-header {
+            background-color: var(--dark-2);
+            padding: 1.5rem 2rem;
+            border-bottom: 1px solid var(--dark-3);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: sticky;
+            top: 0;
+            z-index: 999;
+        }
+
+        .main-header h2 {
+            font-size: 1.8rem;
+            font-weight: 700;
+            color: var(--light-1);
+        }
+
+        .main-content {
+            padding: 2rem;
+            flex-grow: 1;
+        }
+
+        .page-section {
+            margin-bottom: 2.5rem;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+
+        .page-section.hidden {
+            opacity: 0;
+            transform: translateY(20px);
+            pointer-events: none;
+            position: absolute; /* Take out of flow when hidden */
+            width: calc(100% - 4rem); /* Adjust for padding */
+        }
+
+        /* Mobile adjustments */
+        @media (max-width: 768px) {
+            #app {
+                flex-direction: column;
+            }
+            .sidebar {
+                width: 100%;
+                height: auto;
+                position: relative;
+                border-right: none;
+                border-bottom: 1px solid var(--dark-3);
+                padding-bottom: 1rem;
+            }
+            .sidebar-nav ul {
+                display: flex;
+                flex-wrap: wrap;
+                justify-content: center;
+                gap: 0.5rem;
+            }
+            .sidebar-nav li {
+                margin-bottom: 0;
+            }
+            .sidebar-nav a {
+                padding: 0.5rem 0.75rem;
+                font-size: 0.875rem;
+            }
+            .sidebar-nav a svg {
+                display: none; /* Hide icons on mobile nav for compactness */
+            }
+            .main-header {
+                padding: 1rem 1.5rem;
+            }
+            .main-header h2 {
+                font-size: 1.5rem;
+            }
+            .main-content {
+                padding: 1.5rem;
+            }
+            .page-section.hidden {
+                width: calc(100% - 3rem); /* Adjust for mobile padding */
+            }
+        }
+
+        /* Utility Classes */
+        .hidden {
+            display: none !important;
+        }
+        .btn-loader {
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid #fff;
+            border-radius: 50%;
+            width: 16px;
+            height: 16px;
+            animation: spin 1s linear infinite;
+            margin-left: 8px;
+        }
+        .btn-text {
+            display: inline-block;
+        }
+        .btn-loader.hidden + .btn-text {
+            display: inline-block;
+        }
+        .btn-loader:not(.hidden) + .btn-text {
+            display: none;
+        }
+        .replacement-stats .stats-row {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 1rem;
+            text-align: center;
+        }
+        .replacement-stats .stat-item {
+            flex: 1;
+            padding: 0.5rem;
+            background-color: var(--dark-3);
+            border-radius: 0.5rem;
+            margin: 0 0.5rem;
+        }
+        .replacement-stats .stat-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            color: var(--primary);
+        }
+        .replacement-stats .stat-label {
+            font-size: 0.75rem;
+            color: var(--light-2);
+        }
+    </style>
 </head>
 <body>
-    <div class="bg-animated" aria-hidden="true"></div>
     <!-- Loading Screen -->
     <div id="loading-screen" class="loading-screen">
         <div class="loading-content">
@@ -29,348 +786,366 @@
         </div>
     </div>
 
-    <!-- Main App -->
+    <!-- Main App Container -->
     <div id="app" class="app hidden">
-        <!-- Header -->
-        <header class="header">
-            <div class="header-content">
-                <div class="logo">
-                    <div class="vortex-icon"></div>
-                    <h1>VortexVPN</h1>
-                </div>
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="sidebar-logo">
+                <div class="vortex-icon"></div>
+                <h1>VortexVPN</h1>
+            </div>
+            <nav class="sidebar-nav">
+                <ul>
+                    <li>
+                        <a href="#" data-section="config-section" class="nav-link active">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0M3.75 18H7.5m-3-6h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0M3.75 12H7.5" />
+                            </svg>
+                            Configuration
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" data-section="add-test-section" class="nav-link">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M13.19 8.688a4.5 4.5 0 011.242 7.244l-4.5 4.5a4.5 4.5 0 01-6.364-6.364l1.757-1.757m13.35-.622l1.757-1.757a4.5 4.5 0 00-6.364-6.364l-4.5 4.5a4.5 4.5 0 001.242 7.244" />
+                            </svg>
+                            Add & Test
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" data-section="live-testing-section" class="nav-link">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 13.125N12.75M3 13.125a9.75 9.75 0 016.004-9.07M3 13.125v6.75m9.75-6.75a9.75 9.75 0 016.004 9.07m-9.75-6.75h6.75m-3 0l-3-3m3 3l3-3m-3 3v6.75m-9.75 0h6.75" />
+                            </svg>
+                            Live Testing
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" data-section="results-section" class="nav-link">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M10.125 3.75c-.625 0-1.125.504-1.125 1.125v3.75c0 .621.504 1.125 1.125 1.125h3.75c.621 0 1.125-.504 1.125-1.125V4.875c0-.621-.504-1.125-1.125-1.125h-3.75zM3.75 9.375c-.625 0-1.125.504-1.125 1.125v3.75c0 .621.504 1.125 1.125 1.125h3.75c.621 0 1.125-.504 1.125-1.125v-3.75c0-.621-.504-1.125-1.125-1.125h-3.75zM9.375 15.75c-.625 0-1.125.504-1.125 1.125v3.75c0 .621.504 1.125 1.125 1.125h3.75c.621 0 1.125-.504 1.125-1.125v-3.75c0-.621-.504-1.125-1.125-1.125h-3.75z" />
+                            </svg>
+                            Results
+                        </a>
+                    </li>
+                    <li>
+                        <a href="#" data-section="download-upload-section" class="nav-link">
+                            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor" class="w-6 h-6">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5M16.5 12L12 16.5m0 0L7.5 12m4.5 4.5V3" />
+                            </svg>
+                            Download & Upload
+                        </a>
+                    </li>
+                </ul>
+            </nav>
+        </aside>
+
+        <!-- Main Content Area -->
+        <div class="content-area">
+            <!-- Header (Dynamic Section Title, Status Indicator) -->
+            <header class="main-header">
+                <h2 id="current-section-title">Configuration</h2>
                 <div class="status-indicator" id="status-indicator">
-                    <button class="btn" id="theme-toggle" title="Toggle theme">🌓</button>
                     <span class="status-dot"></span>
                     <span id="status-text">Ready</span>
                 </div>
-            </div>
-        </header>
+            </header>
 
-        <!-- USER REQUEST: Navigation removed - single page layout only -->
-
-        <!-- Content Sections -->
-        <main class="main">
-            <div class="layout">
-                <div class="left-col">
-                    <!-- Configuration Setup - USER REQUEST: Single page layout dengan setup options -->
-            <div class="page-section">
-                <div class="section-header">
-                    <h2>🔧 Configuration Setup</h2>
-                    <p>Choose your configuration source and setup options</p>
-                </div>
-
-                <!-- Setup Source Options -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3>📁 Configuration Source</h3>
+            <!-- Section Content (Dynamic based on sidebar selection) -->
+            <main class="main-content">
+                <!-- Configuration Section -->
+                <section id="config-section" class="page-section">
+                    <div class="section-header">
+                        <h2>🔧 Configuration Setup</h2>
+                        <p>Choose your configuration source and setup options</p>
                     </div>
-                    <div class="card-content">
-                        <div class="setup-options">
-                            <label class="setup-option">
-                                <input type="radio" name="setup-source" value="template" checked>
-                                <div class="option-card">
-                                    <div class="option-icon">📄</div>
-                                    <div class="option-info">
-                                        <h4>Local Template</h4>
-                                        <p>Use built-in template.json configuration</p>
+
+                    <!-- Setup Source Options -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>📁 Configuration Source</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="setup-options grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                <label class="setup-option cursor-pointer">
+                                    <input type="radio" name="setup-source" value="template" class="hidden" checked>
+                                    <div class="option-card p-4 rounded-lg border border-dark-3 bg-dark-3 hover:bg-dark-3/70 transition-all flex flex-col items-center text-center gap-2">
+                                        <div class="option-icon text-3xl">📄</div>
+                                        <div class="option-info">
+                                            <h4 class="font-semibold text-light-1 text-lg">Local Template</h4>
+                                            <p class="text-sm text-light-2 opacity-80">Use built-in template.json</p>
+                                        </div>
                                     </div>
-                                </div>
-                            </label>
-                            <label class="setup-option">
-                                <input type="radio" name="setup-source" value="github">
-                                <div class="option-card">
-                                    <div class="option-icon">🐙</div>
-                                    <div class="option-info">
-                                        <h4>GitHub Repository</h4>
-                                        <p>Load configuration from GitHub repo</p>
+                                </label>
+                                <label class="setup-option cursor-pointer">
+                                    <input type="radio" name="setup-source" value="github" class="hidden">
+                                    <div class="option-card p-4 rounded-lg border border-dark-3 bg-dark-3 hover:bg-dark-3/70 transition-all flex flex-col items-center text-center gap-2">
+                                        <div class="option-icon text-3xl">🐙</div>
+                                        <div class="option-info">
+                                            <h4 class="font-semibold text-light-1 text-lg">GitHub Repository</h4>
+                                            <p class="text-sm text-light-2 opacity-80">Load from GitHub repo</p>
+                                        </div>
                                     </div>
-                                </div>
-                            </label>
+                                </label>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- GitHub Setup Card (shown when GitHub option selected) -->
-                <div class="card" id="github-setup-card" style="display: none;">
-                    <div class="card-header">
-                        <h3>🐙 GitHub Configuration</h3>
-                        <span class="badge" id="github-status">Not Configured</span>
-                    </div>
-                    <div class="card-content">
-                        <div class="form-group">
-                            <label for="github-token">GitHub Token</label>
-                            <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxx">
-                            <small>Personal access token with repo permissions</small>
+                    <!-- GitHub Setup Card (shown when GitHub option selected) -->
+                    <div class="card mt-6" id="github-setup-card" style="display: none;">
+                        <div class="card-header">
+                            <h3>🐙 GitHub Configuration</h3>
+                            <span class="badge" id="github-status">Not Configured</span>
                         </div>
-                        <div class="form-group">
-                            <label for="github-owner">Repository Owner</label>
-                            <input type="text" id="github-owner" placeholder="username">
-                            <small>GitHub username or organization (auto-filled from database)</small>
-                        </div>
-                        <div class="form-group">
-                            <label for="github-repo">Repository Name</label>
-                            <input type="text" id="github-repo" placeholder="repository">
-                            <small>Repository name (editable even when auto-filled)</small>
-                        </div>
-                        
-                        <!-- GitHub File Selection -->
-                        <div id="github-file-selection" style="display: none;">
+                        <div class="card-content">
                             <div class="form-group">
-                                <label for="github-files">Select Configuration File</label>
-                                <select id="github-files">
-                                    <option value="">Loading...</option>
-                                </select>
+                                <label for="github-token">GitHub Token</label>
+                                <input type="password" id="github-token" placeholder="ghp_xxxxxxxxxxxx" class="input-field">
+                                <small class="text-xs text-light-2 opacity-70 mt-1 block">Personal access token with repo permissions</small>
                             </div>
+                            <div class="form-group">
+                                <label for="github-owner">Repository Owner</label>
+                                <input type="text" id="github-owner" placeholder="username" class="input-field">
+                                <small class="text-xs text-light-2 opacity-70 mt-1 block">GitHub username or organization (auto-filled from database)</small>
+                            </div>
+                            <div class="form-group">
+                                <label for="github-repo">Repository Name</label>
+                                <input type="text" id="github-repo" placeholder="repository" class="input-field">
+                                <small class="text-xs text-light-2 opacity-70 mt-1 block">Repository name (editable even when auto-filled)</small>
+                            </div>
+                            
+                            <!-- GitHub File Selection -->
+                            <div id="github-file-selection" style="display: none;">
+                                <div class="form-group">
+                                    <label for="github-files">Select Configuration File</label>
+                                    <select id="github-files" class="input-field">
+                                        <option value="">Loading...</option>
+                                    </select>
+                                </div>
+                            </div>
+
+                            <button class="btn btn-primary mt-4 w-full" id="setup-github-btn">
+                                <span class="btn-text">💾 Save GitHub Config</span>
+                                <div class="btn-loader hidden"></div>
+                            </button>
                         </div>
-
-                        <button class="btn btn-primary" id="setup-github-btn">
-                            <span class="btn-text">💾 Save GitHub Config</span>
-                            <div class="btn-loader hidden"></div>
-                        </button>
                     </div>
-                </div>
 
-                <!-- Template Status Card (shown when Template option selected) -->
-                <div class="card" id="template-status-card">
-                    <div class="card-header">
-                        <h3>📄 Template Configuration</h3>
-                        <span class="badge success">Ready</span>
+                    <!-- Template Status Card (shown when Template option selected) -->
+                    <div class="card mt-6" id="template-status-card">
+                        <div class="card-header">
+                            <h3>📄 Template Configuration</h3>
+                            <span class="badge success">Ready</span>
+                        </div>
+                        <div class="card-content">
+                            <p class="text-light-2">✅ Using built-in template.json configuration file.</p>
+                            <small class="text-xs text-light-2 opacity-70 mt-1 block">Configuration will be automatically loaded when you start testing.</small>
+                        </div>
                     </div>
-                    <div class="card-content">
-                        <p>✅ Using built-in template.json configuration file.</p>
-                        <small>Configuration will be automatically loaded when you start testing.</small>
-                    </div>
-                </div>
 
-                <!-- Setup Status -->
-                <div class="card" id="setup-status" style="display: none;">
-                    <div class="card-content">
-                        <div class="status-message" id="setup-status-message"></div>
+                    <!-- Setup Status -->
+                    <div class="card mt-6" id="setup-status" style="display: none;">
+                        <div class="card-content">
+                            <div class="status-message text-light-2" id="setup-status-message"></div>
+                        </div>
                     </div>
-                </div>
-            </div>
+                </section>
 
-            <!-- Add Links & Test Section -->
-            <div class="page-section">
-                <div class="section-header">
-                    <h2>🔗 Add VPN Links & Test</h2>
-                    <p>Paste your VPN links and start testing immediately</p>
-                </div>
-
-                <!-- Testing Mode -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3>⚙️ Metode Pengetesan</h3>
+                <!-- Add Links & Test Section -->
+                <section id="add-test-section" class="page-section hidden">
+                    <div class="section-header">
+                        <h2>🔗 Add VPN Links & Test</h2>
+                        <p>Paste your VPN links and start testing immediately</p>
                     </div>
-                    <div class="card-content">
-                        <div class="radio-group">
-                            <label class="radio-option">
-                                <input type="radio" name="testing-mode" value="fast">
-                                <span class="radio-custom"></span>
-                                <div class="radio-label">
-                                    <strong>Cepat (Non‑Xray)</strong>
-                                    <small>TCP + TLS/WS ringan untuk semua akun (paling cepat)</small>
-                                </div>
-                            </label>
-                            <label class="radio-option">
-                                <input type="radio" name="testing-mode" value="accurate" checked>
-                                <span class="radio-custom"></span>
-                                <div class="radio-label">
-                                    <strong>Akurat (Filter → Xray)</strong>
-                                    <small>Saring cepat lalu Xray semua yang lolos (disarankan)</small>
-                                </div>
-                            </label>
-                            <label class="radio-option">
-                                <input type="radio" name="testing-mode" value="xray-only">
-                                <span class="radio-custom"></span>
-                                <div class="radio-label">
-                                    <strong>Xray‑Only</strong>
-                                    <small>Xray untuk semua akun (paling akurat, paling berat)</small>
-                                </div>
-                            </label>
-                            <label class="radio-option">
-                                <input type="radio" name="testing-mode" value="hybrid">
-                                <span class="radio-custom"></span>
-                                <div class="radio-label">
-                                    <strong>Hybrid (Top‑N)</strong>
-                                    <small>Non‑Xray semua, Xray hanya Top‑N berdasarkan latency</small>
-                                    <div style="margin-top:8px; display:flex; align-items:center; gap:8px;">
-                                        <label for="hybrid-top-n" style="margin:0; font-size:12px; color:#aaa;">Top‑N:</label>
-                                        <input type="number" id="hybrid-top-n" value="20" min="1" max="999" style="width:80px; padding:4px;">
+
+                    <!-- Testing Mode -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h3>⚙️ Metode Pengetesan</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="radio-group">
+                                <label class="radio-option">
+                                    <input type="radio" name="testing-mode" value="fast">
+                                    <span class="radio-custom"></span>
+                                    <div class="radio-label">
+                                        <strong>Cepat (Non‑Xray)</strong>
+                                        <small>TCP + TLS/WS ringan untuk semua akun (paling cepat)</small>
                                     </div>
-                                </div>
-                            </label>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- Add Links -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3>🤖 Smart VPN Input</h3>
-                        <span class="badge auto-detection">Auto-Detection</span>
-                    </div>
-                    <div class="card-content">
-                        <div class="form-group">
-                            <label for="vpn-links">Paste VPN Links or URLs</label>
-                            <textarea 
-                                id="vpn-links" 
-                                placeholder="🤖 Smart Input - Paste any of these:
-
-📝 VPN Links:
-vless://uuid@server:443?path=/path&security=tls&host=host.com#name
-trojan://password@server:443?path=/path&security=tls&host=host.com#name
-
-🌐 API URLs:
-https://admin.ari-andika2.site/api/v2ray?type=vless&bug=quiz.int.vidio.com&tls=true&limit=5&country=SG
-
-📄 Raw URLs:
-https://raw.githubusercontent.com/user/repo/main/vpn-accounts.txt
-https://pastebin.com/raw/ABC123
-
-✨ The system will automatically detect and process your input!"
-                                rows="12"
-                            ></textarea>
-                            <div class="smart-detection-info">
-                                <div class="detection-indicator" id="detection-indicator">
-                                    <span class="detection-icon">🤖</span>
-                                    <span class="detection-text">Ready for smart detection...</span>
-                                </div>
-                                <small>
-                                    <strong>Auto-Detection Features:</strong><br>
-                                    • 🔗 Direct VPN links → Parse immediately<br>
-                                    • 🌐 Single URL → Auto-fetch from API/Raw<br>  
-                                    • 📚 Multiple URLs → Fetch from all sources<br>
-                                    • ⚡ No manual switching required!
-                                </small>
+                                </label>
+                                <label class="radio-option">
+                                    <input type="radio" name="testing-mode" value="accurate" checked>
+                                    <span class="radio-custom"></span>
+                                    <div class="radio-label">
+                                        <strong>Akurat (Filter → Xray)</strong>
+                                        <small>Saring cepat lalu Xray semua yang lolos (disarankan)</small>
+                                    </div>
+                                </label>
+                                <label class="radio-option">
+                                    <input type="radio" name="testing-mode" value="xray-only">
+                                    <span class="radio-custom"></span>
+                                    <div class="radio-label">
+                                        <strong>Xray‑Only</strong>
+                                        <small>Xray untuk semua akun (paling akurat, paling berat)</small>
+                                    </div>
+                                </label>
+                                <label class="radio-option">
+                                    <input type="radio" name="testing-mode" value="hybrid">
+                                    <span class="radio-custom"></span>
+                                    <div class="radio-label">
+                                        <strong>Hybrid (Top‑N)</strong>
+                                        <small>Non‑Xray semua, Xray hanya Top‑N berdasarkan latency</small>
+                                        <div class="mt-2 flex items-center gap-2">
+                                            <label for="hybrid-top-n" class="text-xs text-light-2 opacity-70">Top‑N:</label>
+                                            <input type="number" id="hybrid-top-n" value="20" min="1" max="999" class="input-field w-20 p-1 text-sm">
+                                        </div>
+                                    </div>
+                                </label>
                             </div>
                         </div>
-
-                        <button class="btn btn-success btn-large" id="add-and-test-btn">
-                            <span class="btn-text">🚀 Smart Process & Start Testing</span>
-                            <div class="btn-loader hidden"></div>
-                        </button>
                     </div>
-                </div>
 
-                <!-- Advanced (Auto Fetch) - hidden by default -->
-                <div class="card" id="advanced-card">
-                    <div class="card-header" style="display:flex; align-items:center; gap:8px; justify-content:space-between;">
-                        <div style="display:flex; align-items:center; gap:8px;">
-                            <h3 style="margin:0;">🔧 Advanced (Auto Fetch)</h3>
-                            <button class="btn" id="adv-info-btn" title="Info">!</button>
+                    <!-- Add Links -->
+                    <div class="card mt-6">
+                        <div class="card-header">
+                            <h3>🤖 Smart VPN Input</h3>
+                            <span class="badge auto-detection">Auto-Detection</span>
                         </div>
-                        <div style="display:flex; gap:8px; align-items:center;">
-                            <button class="btn" id="toggle-advanced">Show</button>
+                        <div class="card-content">
+                            <div class="form-group">
+                                <label for="vpn-links">Paste VPN Links or URLs</label>
+                                <textarea 
+                                    id="vpn-links" 
+                                    placeholder="🤖 Smart Input - Paste any of these:
+
+📝 VPN Links
+🌐 API URLs
+📄 Raw URLs
+✨ The system will automatically detect and process your input!"
+                                    rows="12"
+                                    class="input-field font-mono text-sm"
+                                ></textarea>
+                                <div class="smart-detection-info">
+                                    <div class="detection-indicator" id="detection-indicator">
+                                        <span class="detection-icon">🤖</span>
+                                        <span class="detection-text">Ready for smart detection...</span>
+                                    </div>
+                                    <small class="text-xs text-light-2 opacity-70">
+                                        <strong>Auto-Detection Features:</strong><br>
+                                        • 🔗 Direct VPN links → Parse immediately<br>
+                                        • 🌐 Single URL → Auto-fetch from API/Raw<br>  
+                                        • 📚 Multiple URLs → Fetch from all sources
+                                    </small>
+                                </div>
+                            </div>
+
+                            <button class="btn btn-success btn-large w-full mt-4" id="add-and-test-btn">
+                                <span class="btn-text">Start</span>
+                                <div class="btn-loader hidden"></div>
+                            </button>
                         </div>
                     </div>
-                    <div class="card-content">
-                        <div id="adv-desc" style="display:none; margin-bottom:10px; color:var(--text-muted);">
-                            Auto fetch dari provider API berdasarkan jenis, negara, bug, TLS, dan limit. Gunakan Preview sebelum Fetch & Add.
+
+                    <!-- Advanced (Auto Fetch) - hidden by default -->
+                    <div class="card mt-6">
+                        <div class="card-header">
+                            <h3 class="flex items-center gap-2">🔧 Advanced</h3>
+                            <button class="btn btn-secondary px-4 py-2 text-sm" id="toggle-advanced">Show</button>
                         </div>
-                        <div id="advanced-panel" style="display:none;">
+                        <div class="card-content" id="advanced-panel" style="display:none;">
                             <div class="form-group">
                                 <label>Types (multi-select)</label>
-                                <div style="display:flex; gap:12px; flex-wrap:wrap;">
-                                    <label><input type="checkbox" class="adv-type" value="vless"> vless</label>
-                                    <label><input type="checkbox" class="adv-type" value="vmess"> vmess</label>
-                                    <label><input type="checkbox" class="adv-type" value="trojan" checked> trojan</label>
-                                    <label><input type="checkbox" class="adv-type" value="ss"> ss</label>
+                                <div class="flex gap-3 flex-wrap">
+                                    <label class="flex items-center text-sm text-light-2"><input type="checkbox" class="adv-type mr-2" value="vless"> vless</label>
+                                    <label class="flex items-center text-sm text-light-2"><input type="checkbox" class="adv-type mr-2" value="vmess"> vmess</label>
+                                    <label class="flex items-center text-sm text-light-2"><input type="checkbox" class="adv-type mr-2" value="trojan" checked> trojan</label>
+                                    <label class="flex items-center text-sm text-light-2"><input type="checkbox" class="adv-type mr-2" value="ss"> ss</label>
                                 </div>
-                                <small>Pilih satu atau lebih. Jika kosong nanti akan diacak dari 4 jenis tersebut.</small>
+                                <small class="text-xs text-light-2 opacity-70 mt-1 block">Pilih satu atau lebih. Jika kosong nanti akan diacak dari 4 jenis tersebut.</small>
                             </div>
                             <div class="form-group">
                                 <label for="adv-bugs">Bugs (SNI/Host) - pisah koma atau baris</label>
-                                <textarea id="adv-bugs" rows="3" placeholder="quiz.int.vidio.com, example.com"></textarea>
+                                <textarea id="adv-bugs" rows="3" placeholder="quiz.int.vidio.com, example.com" class="input-field text-sm"></textarea>
                             </div>
                             <div class="form-group">
                                 <label for="adv-countries">Countries - pisah koma atau baris</label>
-                                <textarea id="adv-countries" rows="2" placeholder="sg, id, jp, random"></textarea>
+                                <textarea id="adv-countries" rows="2" placeholder="sg, id, jp, random" class="input-field text-sm"></textarea>
                             </div>
-                            <div class="form-group" style="display:flex; gap:16px; flex-wrap:wrap;">
+                            <div class="form-group flex gap-4 flex-wrap">
                                 <div>
-                                    <label for="adv-tls">TLS</label>
-                                    <select id="adv-tls">
+                                    <label for="adv-tls" class="text-sm">TLS</label>
+                                    <select id="adv-tls" class="input-field w-auto">
                                         <option value="true" selected>true</option>
                                         <option value="false">false</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="adv-wildcard">Wildcard</label>
-                                    <select id="adv-wildcard">
+                                    <label for="adv-wildcard" class="text-sm">Wildcard</label>
+                                    <select id="adv-wildcard" class="input-field w-auto">
                                         <option value="false" selected>false</option>
                                         <option value="true">true</option>
                                     </select>
                                 </div>
                                 <div>
-                                    <label for="adv-limit">Limit</label>
-                                    <input id="adv-limit" type="number" value="10" min="1" max="100" style="width:100px;">
+                                    <label for="adv-limit" class="text-sm">Limit</label>
+                                    <input id="adv-limit" type="number" value="10" min="1" max="100" class="input-field w-24">
                                 </div>
                             </div>
                             <div class="form-group">
-                                <small id="adv-preview-info">No preview</small>
+                                <small id="adv-preview-info" class="text-xs text-light-2 opacity-70">No preview</small>
                             </div>
-                            <div class="button-group">
-                                <button class="btn" id="adv-preview-btn">Preview</button>
-                                <button class="btn btn-success" id="adv-fetch-add-btn">Fetch & Add (Advanced)</button>
+                            <div class="button-group flex gap-3 mt-4">
+                                <button class="btn btn-secondary px-4 py-2 text-sm" id="adv-preview-btn">Preview</button>
+                                <button class="btn btn-success px-4 py-2 text-sm" id="adv-fetch-add-btn">Fetch & Add</button>
                             </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Server Replacement -->
-                <div class="card">
-                    <div class="card-header">
-                        <h3>🔄 Custom Servers (Auto-Apply)</h3>
-                        <span class="badge" id="server-replace-status">Ready</span>
-                    </div>
-                    <div class="card-content">
-                        <div class="form-group">
-                            <label for="replacement-servers">Custom Server Addresses (Auto-Apply)</label>
-                            <textarea 
-                                id="replacement-servers" 
-                                placeholder="Enter custom server addresses (one per line or comma separated):&#10;custom1.example.com&#10;custom2.example.com&#10;or: custom1.com, custom2.com, custom3.com"
-                                rows="4"
-                            ></textarea>
-                            <small>💡 These servers will be automatically applied when testing completes. Leave empty to use original servers.</small>
+                    <!-- Server Replacement -->
+                    <div class="card mt-6">
+                        <div class="card-header">
+                            <h3>🔄 Custom Servers</h3>
+                            <span class="badge" id="server-replace-status">Ready</span>
                         </div>
-                        <div class="replacement-stats" id="replacement-stats" style="display: none;">
-                            <div class="stats-row">
-                                <div class="stat-item">
-                                    <span class="stat-value" id="total-vpn-accounts">0</span>
-                                    <span class="stat-label">VPN Accounts</span>
+                        <div class="card-content">
+                            <div class="form-group">
+                                <label for="replacement-servers">Custom Server Address</label>
+                                <textarea 
+                                    id="replacement-servers" 
+                                    placeholder="Enter custom server addresses (one per line or comma separated):&#10;custom1.example.com&#10;custom2.example.com&#10;or: custom1.com, custom2.com, custom3.com"
+                                    rows="4"
+                                    class="input-field font-mono text-sm"
+                                ></textarea>
+                                <small class="text-xs text-light-2 opacity-70 mt-1 block">💡 These servers will be automatically applied when testing completes. Leave empty to use original servers.</small>
+                            </div>
+                            <div class="replacement-stats" id="replacement-stats" style="display: none;">
+                                <div class="stats-row">
+                                    <div class="stat-item">
+                                        <span class="stat-value" id="total-vpn-accounts">0</span>
+                                        <span class="stat-label">VPN Accounts</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-value" id="total-servers">0</span>
+                                        <span class="stat-label">New Servers</span>
+                                    </div>
+                                    <div class="stat-item">
+                                        <span class="stat-value" id="accounts-per-server">0</span>
+                                        <span class="stat-label">Per Server</span>
+                                    </div>
                                 </div>
-                                <div class="stat-item">
-                                    <span class="stat-value" id="total-servers">0</span>
-                                    <span class="stat-label">New Servers</span>
-                                </div>
-                                <div class="stat-item">
-                                    <span class="stat-value" id="accounts-per-server">0</span>
-                                    <span class="stat-label">Per Server</span>
+                            </div>
+                            <div class="info-box">
+                                <div class="info-icon">ℹ️</div>
+                                <div class="info-text">
+                                    <strong>Auto-Apply:</strong> Custom servers will be automatically applied when testing completes. 
+                                    If multiple servers are provided, they will be randomly distributed across successful accounts.
                                 </div>
                             </div>
                         </div>
-                        <div class="info-box">
-                            <div class="info-icon">ℹ️</div>
-                            <div class="info-text">
-                                <strong>Auto-Apply:</strong> Custom servers will be automatically applied when testing completes. 
-                                If multiple servers are provided, they will be randomly distributed across successful accounts.
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                </div> <!-- end left-col -->
-                <div class="right-col">
-                    <div class="status-bar">
-                        <div class="status-line">
-                            <span id="status-summary">Testing status will appear here…</span>
-                        </div>
-                        <div class="progress-bar"><div id="status-fill" style="width:0%"></div></div>
                     </div>
 
                     <!-- Quick Stats -->
-                    <div class="card" id="quick-stats" style="display: none;">
+                    <div class="card mt-6" id="quick-stats" style="display: none;">
                         <div class="card-header">
                             <h3>Quick Summary</h3>
                         </div>
@@ -387,157 +1162,217 @@ https://pastebin.com/raw/ABC123
                             </div>
                         </div>
                     </div>
+                </section>
 
-                    <!-- Live Testing Section -->
-                    <div class="page-section">
-                        <div class="section-header">
-                            <h2>📊 Live Testing Progress</h2>
-                            <p>Real-time VPN connection testing results</p>
+                <!-- Live Testing Section -->
+                <section id="live-testing-section" class="page-section hidden">
+                    <div class="section-header">
+                        <h2>📊 Live Testing Progress</h2>
+                        <p>Real-time VPN connection testing results</p>
+                    </div>
+
+                    <!-- Progress -->
+                    <div class="card" id="testing-progress" style="display: none;">
+                        <div class="card-header">
+                            <h3>Testing Progress</h3>
                         </div>
-
-                        <!-- Progress -->
-                        <div class="card" id="testing-progress" style="display: none;">
-                            <div class="card-header">
-                                <h3>Testing Progress</h3>
+                        <div class="card-content">
+                            <div class="progress-info">
+                                <span id="progress-text">0 / 0 accounts tested</span>
+                                <span id="progress-percent">0%</span>
                             </div>
-                            <div class="card-content">
-                                <div class="progress-info">
-                                    <span id="progress-text">0 / 0 accounts tested</span>
-                                    <span id="progress-percent">0%</span>
-                                </div>
-                                <div class="progress-bar">
-                                    <div class="progress-fill" id="progress-fill"></div>
-                                </div>
-                                <div class="test-stats">
-                                    <div class="test-stat-item success">
-                                        <span id="successful-count">0</span>
-                                        <span>✅ Success</span>
-                                    </div>
-                                    <div class="test-stat-item failed">
-                                        <span id="failed-count">0</span>
-                                        <span>❌ Failed</span>
-                                    </div>
-                                    <div class="test-stat-item testing">
-                                        <span id="testing-count">0</span>
-                                        <span>🔄 Testing</span>
-                                    </div>
-                                </div>
+                            <div class="progress-bar">
+                                <div class="progress-fill" id="progress-fill"></div>
                             </div>
-                        </div>
-
-                        <!-- Live Results Table -->
-                        <div class="card" id="live-results" style="display: none;">
-                            <div class="card-header">
-                                <h3>Live Test Results</h3>
-                                <small>Updated in real-time</small>
-                            </div>
-                            <div class="card-content">
-                                <div class="testing-table-container">
-                                    <table class="testing-table" id="testing-table">
-                                        <thead>
-                                            <tr>
-                                                <th>#</th>
-                                                <th>Tag</th>
-                                                <th>Type</th>
-                                                <th>Country</th>
-                                                <th>Latency</th>
-                                                <th>Status</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody id="testing-table-body"></tbody>
-                                    </table>
+                            <div class="test-stats">
+                                <div class="test-stat-item success">
+                                    <span id="successful-count">0</span>
+                                    <span>✅ Success</span>
+                                </div>
+                                <div class="test-stat-item failed">
+                                    <span id="failed-count">0</span>
+                                    <span>❌ Failed</span>
+                                </div>
+                                <div class="test-stat-item testing">
+                                    <span id="testing-count">0</span>
+                                    <span>🔄 Testing</span>
                                 </div>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- Recent Activity -->
-                        <div class="card" id="recent-activity" style="display: none;">
-                            <div class="card-header">
-                                <h3>Recent Activity</h3>
-                            </div>
-                            <div class="card-content">
-                                <div class="activity-log" id="activity-log"></div>
+                    <!-- Live Results Table -->
+                    <div class="card mt-6" id="live-results" style="display: none;">
+                        <div class="card-header">
+                            <h3>Live Test Results</h3>
+                            <small class="text-xs text-light-2 opacity-70">Updated in real-time</small>
+                        </div>
+                        <div class="card-content">
+                            <div class="testing-table-container">
+                                <table class="testing-table" id="testing-table">
+                                    <thead>
+                                        <tr>
+                                            <th class="order-header">No</th>
+                                            <th class="type-header">Type</th>
+                                            <th class="country-header">Country</th>
+                                            <th class="provider-header">Provider</th>
+                                            <th class="ip-header">IP</th>
+                                            <th class="latency-header">Latency</th>
+                                            <th class="jitter-header">Jitter</th>
+                                            <th class="icmp-header">ICMP</th>
+                                            <th class="status-header">Status</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="testing-table-body">
+                                        <!-- Results will be populated here -->
+                                    </tbody>
+                                </table>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- Config notification (hidden, used by JS) -->
-                        <div class="card" id="config-notification" style="display: none;">
-                            <div class="card-header">
-                                <h3>✅ Configuration Generated!</h3>
-                            </div>
-                            <div class="card-content">
-                                <p>Your VPN configuration has been automatically generated and is ready for download or upload to GitHub.</p>
+                    <!-- Auto-generated Config Notification -->
+                    <div class="card mt-6" id="config-notification" style="display: none;">
+                        <div class="card-header">
+                            <h3>✅ Configuration Generated!</h3>
+                        </div>
+                        <div class="card-content">
+                            <p class="text-light-2">Your VPN configuration has been automatically generated and is ready for download or upload to GitHub.</p>
+                            <div class="notification-actions mt-4">
+                                <button class="btn btn-primary w-full" onclick="switchSection('download-upload-section')">
+                                    📥 Go to Download/Upload
+                                </button>
                             </div>
                         </div>
+                    </div>
+                </section>
 
-                        <!-- Results summary (hidden, used by JS) -->
-                        <div class="card" id="results-summary" style="display:none;">
-                            <div class="card-header"><h3>Summary</h3></div>
-                            <div class="card-content">
-                                <div class="summary-stats">
-                                    <div class="summary-item">
-                                        <span class="summary-value" id="summary-successful">0</span>
-                                        <span class="summary-label">Successful</span>
-                                    </div>
-                                    <div class="summary-item">
-                                        <span class="summary-value" id="summary-failed">0</span>
-                                        <span class="summary-label">Failed</span>
-                                    </div>
-                                    <div class="summary-item">
-                                        <span class="summary-value" id="summary-avg-latency">0ms</span>
-                                        <span class="summary-label">Avg Latency</span>
-                                    </div>
+                <!-- Results Section -->
+                <section id="results-section" class="page-section hidden">
+                    <div class="section-header">
+                        <h2>Test Results</h2>
+                        <p>View detailed results and successful connections</p>
+                    </div>
+
+                    <!-- Results Summary -->
+                    <div class="card" id="results-summary" style="display: none;">
+                        <div class="card-header">
+                            <h3>Summary</h3>
+                        </div>
+                        <div class="card-content">
+                            <div class="summary-stats">
+                                <div class="summary-item">
+                                    <span class="summary-value" id="summary-successful">0</span>
+                                    <span class="summary-label">Successful</span>
                                 </div>
-                                <div id="export-buttons" style="margin-top:12px;"></div>
+                                <div class="summary-item">
+                                    <span class="summary-value" id="summary-failed">0</span>
+                                    <span class="summary-label">Failed</span>
+                                </div>
+                                <div class="summary-item">
+                                    <span class="summary-value" id="summary-avg-latency">0ms</span>
+                                    <span class="summary-label">Avg Latency</span>
+                                </div>
                             </div>
                         </div>
+                    </div>
 
-                        <!-- Detailed Results (hidden, used by JS) -->
-                        <div class="card" id="detailed-results" style="display:none;">
-                            <div class="card-header"><h3>Detailed Results</h3></div>
-                            <div class="card-content">
+                    <!-- Detailed Results -->
+                    <div class="card mt-6" id="detailed-results" style="display: none;">
+                        <div class="card-header">
+                            <h3>Detailed Results</h3>
+                            <div class="filter-controls">
+                                <select id="filter-status" class="input-field w-auto">
+                                    <option value="all">All Results</option>
+                                    <option value="successful">Successful Only</option>
+                                    <option value="failed">Failed Only</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div class="card-content">
+                            <div class="results-table-container">
                                 <div id="results-table"></div>
                             </div>
                         </div>
+                    </div>
+                </section>
 
-                        <!-- Export & Upload -->
-                        <div class="card" id="export-upload">
-                            <div class="card-header" style="display:flex; align-items:center; justify-content:space-between; gap:8px;">
-                                <h3>⬇️ Download & 📤 Upload</h3>
-                            </div>
-                            <div class="card-content">
-                                <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:center;">
-                                    <button class="btn btn-success" id="download-config-btn">
-                                        <span class="btn-text">⬇️ Download VPN Config</span>
-                                    </button>
-                                    <input type="text" id="commit-message" value="Update VPN configuration" placeholder="Commit message" style="min-width:220px;">
-                                    <button class="btn btn-primary" id="upload-github-btn">
-                                        <span class="btn-text">⬆️ Upload to GitHub</span>
-                                    </button>
+                <!-- Download/Upload Section -->
+                <section id="download-upload-section" class="page-section hidden">
+                    <div class="section-header">
+                        <h2>⬇️ Download & Upload</h2>
+                        <p>Your configuration has been auto-generated and is ready!</p>
+                    </div>
+
+                    <!-- Configuration Status -->
+                    <div class="card" id="config-status">
+                        <div class="card-header">
+                            <h3>✅ Configuration Ready</h3>
+                            <span class="badge success" id="config-badge">Auto-Generated</span>
+                        </div>
+                        <div class="card-content">
+                            <p class="text-light-2">Your VPN configuration has been automatically generated with successful accounts.</p>
+                            <div class="config-info">
+                                <div class="config-stat">
+                                    <span class="config-value" id="config-account-count">0</span>
+                                    <span class="config-label">Working Accounts</span>
                                 </div>
-                                <small>Download sing-box JSON atau upload langsung ke GitHub repo kamu.</small>
+                                <div class="config-stat">
+                                    <span class="config-value" id="config-timestamp">-</span>
+                                    <span class="config-label">Generated</span>
+                                </div>
                             </div>
                         </div>
+                    </div>
 
-                    </div> <!-- end page-section -->
+                    <!-- Download Options -->
+                    <div class="card mt-6">
+                        <div class="card-header">
+                            <h3>📥 Download Configuration</h3>
+                        </div>
+                        <div class="card-content">
+                            <button class="btn btn-success btn-large w-full" id="download-config-btn">
+                                <span class="btn-text">⬇️ Download VPN Config</span>
+                                <div class="btn-loader hidden"></div>
+                            </button>
+                            <small class="text-xs text-light-2 opacity-70 mt-2 block">Downloads a sing-box compatible JSON configuration file</small>
+                            <div id="export-buttons" class="mt-3 flex flex-wrap gap-3"></div>
+                        </div>
+                    </div>
 
-                </div> <!-- end right-col -->
-            </div> <!-- end layout -->
-        </main>
-        
-        <button class="fab" id="fab-start" title="Start Testing" style="display:none;">▶</button>
+                    <!-- GitHub Upload -->
+                    <div class="card mt-6" id="github-upload">
+                        <div class="card-header">
+                            <h3>📤 Upload to GitHub</h3>
+                            <span class="badge" id="github-upload-status">Ready</span>
+                        </div>
+                        <div class="card-content">
+                            <div class="form-group">
+                                <label for="commit-message">Commit Message</label>
+                                <input type="text" id="commit-message" value="Update VPN configuration" placeholder="Enter commit message" class="input-field">
+                            </div>
+                            <button class="btn btn-primary btn-large w-full" id="upload-github-btn">
+                                <span class="btn-text">⬆️ Upload to GitHub</span>
+                                <div class="btn-loader hidden"></div>
+                            </button>
+                            <small class="text-xs text-light-2 opacity-70 mt-2 block">Uploads the configuration to your GitHub repository</small>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
 
-        <!-- Toast Notifications -->
-        <div id="toast-container" class="toast-container"></div>
+    <!-- Toast Notifications -->
+    <div id="toast-container" class="toast-container"></div>
 
-        <!-- Bottom Sheet (Mobile) -->
-        <div class="bottom-sheet" id="bottom-sheet">
-            <div class="bottom-sheet-header">
-                <div class="bottom-sheet-handle"></div>
-            </div>
-            <div class="bottom-sheet-content" id="bottom-sheet-content">
-                <!-- Dynamic content -->
-            </div>
+    <!-- Bottom Sheet (Mobile) -->
+    <div class="bottom-sheet" id="bottom-sheet">
+        <div class="bottom-sheet-header">
+            <div class="bottom-sheet-handle"></div>
+        </div>
+        <div class="bottom-sheet-content" id="bottom-sheet-content">
+            <!-- Dynamic content -->
         </div>
     </div>
 
