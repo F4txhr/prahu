@@ -83,9 +83,8 @@ function setProgress(completed, total) {
 const displayOrder = [];           // array of index in completion order
 const latestByIndex = new Map();   // index -> latest result snapshot
 const shownSet = new Set();        // indexes already rendered
-const skeletonSet = new Set(); // indexes with active skeleton placeholder
-const activeSet = new Set();    // indexes currently in-progress
-const activeOrder = [];         // order of first seen in-progress
+const skeletonSet = new Set(); // deprecated (kept for compatibility, not used)
+let skeletonEl = null;             // single global skeleton row element
 
 function isFinalStatus(s) { return s && !['WAIT','🔄','🔁'].includes(s); }
 function isFailureStatus(s) { return s === '❌' || s === 'Dead'; }
@@ -105,42 +104,9 @@ function resetTableState() {
   displayOrder.length = 0;
   latestByIndex.clear();
   shownSet.clear();
-  skeletonSet.clear();
-  activeSet.clear();
-  activeOrder.length = 0;
   rowMap.clear();
   const tbody = $('#results-body'); if (tbody) tbody.innerHTML = '';
-}
-
-function insertSkeleton(idx) {
-  const tbody = $('#results-body'); if (!tbody) return;
-  if (skeletonSet.has(idx)) return;
-  const sk = document.createElement('tr');
-  sk.className = 'skel-row';
-  sk.id = `skel-${idx}`;
-  sk.innerHTML = `
-    <td><span class="skeleton-line lg"></span></td>
-    <td><span class="skeleton-line sm"></span></td>
-    <td><span class="skeleton-line md"></span></td>
-    <td><span class="skeleton-line sm"></span></td>
-    <td><span class="skeleton-line sm"></span></td>
-    <td><span class="skeleton-line md"></span></td>
-  `;
-  tbody.appendChild(sk);
-  skeletonSet.add(idx);
-}
-
-function ensureSkeletonFor(idx) {
-  if (!activeSet.has(idx)) { activeSet.add(idx); activeOrder.push(idx); }
-  insertSkeleton(idx);
-}
-
-function removeSkeleton(idx) {
-  const el = document.getElementById(`skel-${idx}`);
-  if (el) el.remove();
-  skeletonSet.delete(idx);
-  activeSet.delete(idx);
-  const i = activeOrder.indexOf(idx); if (i !== -1) activeOrder.splice(i,1);
+  if (skeletonEl) { skeletonEl.remove(); skeletonEl = null; }
 }
 
 function processResults(list) {
@@ -150,38 +116,26 @@ function processResults(list) {
     latestByIndex.set(r.index, r);
     const twoPhase = (currentMode === 'hybrid' || currentMode === 'accurate');
 
-    // Determine finality with two-phase nuance
     if (twoPhase) {
-      if (r.Status === '✅' && !r.XRAY) {
-        // Phase1 success: treat as in-progress (show skeleton only)
-        ensureSkeletonFor(r.index);
-        continue;
-      }
       if (r.Status === '✅' && r.XRAY) {
-        // Phase2 success: finalize
         if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); }
         upsertRow(r);
-        removeSkeleton(r.index);
         continue;
       }
-      // Failures are final
       if (isFailureStatus(r.Status)) {
         if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); }
         upsertRow(r);
-        removeSkeleton(r.index);
         continue;
       }
-      // Non-final states: ensure skeleton
-      if (!isFinalStatus(r.Status)) { ensureSkeletonFor(r.index); continue; }
+      // phase1 success or non-final: do not render final row here
+      continue;
     } else {
-      // Single-phase modes
       if (isFinalStatus(r.Status)) {
         if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); }
         upsertRow(r);
-        removeSkeleton(r.index);
         continue;
       } else {
-        ensureSkeletonFor(r.index);
+        // non-final in single phase -> handled by global skeleton
         continue;
       }
     }
@@ -196,7 +150,6 @@ function upsertRow(r) {
     tr = document.createElement('tr');
     tr.id = `row-${r.index}`;
     rowMap.set(r.index, tr);
-    tbody.appendChild(tr);
   }
   tr.innerHTML = `
     <td>${escapeHtml(r.OriginalTag || r.tag || '')}</td>
@@ -208,21 +161,48 @@ function upsertRow(r) {
   `;
 }
 
-function rerenderTableInCompletionOrder() {
+function ensureGlobalSkeleton(pending) {
   const tbody = $('#results-body'); if (!tbody) return;
-  const frag = document.createDocumentFragment();
-  // Completed rows in completion order
-  for (const idx of displayOrder) {
-    const tr = rowMap.get(idx);
-    if (tr) frag.appendChild(tr);
+  if (pending) {
+    if (!skeletonEl) {
+      skeletonEl = document.createElement('tr');
+      skeletonEl.id = 'skel-global';
+      skeletonEl.className = 'skel-row';
+      skeletonEl.innerHTML = `
+        <td><span class="skeleton-line lg"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line md"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line md"></span></td>
+      `;
+    }
+    // Position skeleton after last completed row
+    const frag = document.createDocumentFragment();
+    for (const idx of displayOrder) {
+      const tr = rowMap.get(idx);
+      if (tr) frag.appendChild(tr);
+    }
+    frag.appendChild(skeletonEl);
+    tbody.innerHTML = '';
+    tbody.appendChild(frag);
+  } else {
+    if (skeletonEl) { skeletonEl.remove(); skeletonEl = null; }
+    // Re-render finals only
+    const frag = document.createDocumentFragment();
+    for (const idx of displayOrder) {
+      const tr = rowMap.get(idx);
+      if (tr) frag.appendChild(tr);
+    }
+    tbody.innerHTML = '';
+    tbody.appendChild(frag);
   }
-  // Then active skeletons in their first-seen order
-  for (const idx of activeOrder) {
-    const sk = document.getElementById(`skel-${idx}`);
-    if (sk) frag.appendChild(sk);
-  }
-  tbody.innerHTML = '';
-  tbody.appendChild(frag);
+}
+
+function rerenderTableInCompletionOrder(totalHint) {
+  const tbody = $('#results-body'); if (!tbody) return;
+  const pending = Number.isFinite(totalHint) ? (displayOrder.length < totalHint) : false;
+  ensureGlobalSkeleton(pending);
 }
 
 // Socket
@@ -237,7 +217,7 @@ function initSocket() {
       const completed = data.completed ?? data.results?.filter(r => isFinalStatus(r.Status)).length ?? 0;
       setProgress(completed, total);
       processResults(data.results || []);
-      rerenderTableInCompletionOrder();
+      rerenderTableInCompletionOrder(total);
     } catch (err) { console.error(err); }
   });
   socket.on('testing_complete', data => {
@@ -245,7 +225,7 @@ function initSocket() {
       const total = data.total ?? getTotalValue(data);
       setProgress(data.successful ?? 0, total);
       processResults(data.results || []);
-      rerenderTableInCompletionOrder();
+      rerenderTableInCompletionOrder(total);
       updateSummary((data.results || []).filter(shouldShowResult));
       toast('Testing complete', 'success');
     } catch (err) { console.error(err); }
@@ -379,6 +359,8 @@ async function addAndStart(){
     if (!res.success){ toast(res.message||'Add failed','error'); return; }
     resetTableState();
     const total = getTotalValue(res); setProgress(0,total); $('#vpn-input').value=''; toast('Starting tests…','info');
+    // Show one global skeleton immediately to signal progress
+    ensureGlobalSkeleton(true);
     const payload = { mode: currentMode }; if (currentMode==='hybrid') { const n = parseInt($('#top-n').value||'20',10); payload.topN = isNaN(n)?20:Math.max(1,Math.min(999,n)); }
     socket.emit('start_testing', payload);
   } catch (err) { console.error(err); toast('Start failed','error'); }
