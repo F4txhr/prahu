@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VortexVPN Manager</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
+</head>
+<body class="min-h-screen bg-slate-950 text-slate-100 font-[Inter]">
+  <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
+
+  <header class="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur supports-[backdrop-filter]:backdrop-blur px-4 md:px-6">
+    <div class="max-w-7xl mx-auto h-14 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="size-6 rounded-md bg-gradient-to-br from-cyan-400 to-blue-600 shadow-lg shadow-blue-900/20"></div>
+        <h1 class="text-sm md:text-base font-semibold tracking-tight">VortexVPN Manager</h1>
+      </div>
+      <div class="flex items-center gap-2 text-xs md:text-sm">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-text" class="text-slate-300">Ready</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="px-4 md:px-6 py-6">
+    <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+      <!-- Left column -->
+      <section class="lg:col-span-5 space-y-6">
+        <!-- Configuration Source -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Configuration <button class="info-btn" data-info="Pilih sumber konfigurasi: Template lokal atau GitHub.">!</button></h2>
+          </div>
+          <div class="card-body space-y-4">
+            <div class="flex items-center gap-4">
+              <label class="segmented">
+                <input type="radio" name="config-source" value="template" checked />
+                <span>Template</span>
+              </label>
+              <label class="segmented">
+                <input type="radio" name="config-source" value="github" />
+                <span>GitHub</span>
+              </label>
+              <button id="btn-load-config" class="btn btn-primary ml-auto">Load</button>
+            </div>
+
+            <!-- GitHub credentials -->
+            <div id="github-panel" class="hidden space-y-3">
+              <div class="grid grid-cols-3 gap-3">
+                <input id="gh-token" type="password" class="input col-span-3" placeholder="GitHub Token" />
+                <input id="gh-owner" class="input" placeholder="Owner" />
+                <input id="gh-repo" class="input" placeholder="Repo" />
+                <button id="btn-save-gh" class="btn btn-soft col-span-3 md:col-span-1">Save</button>
+                <button id="btn-list-gh" class="btn btn-soft col-span-3 md:col-span-1">List Files</button>
+                <select id="gh-files" class="input col-span-3 md:col-span-1"></select>
+                <button id="btn-load-gh" class="btn btn-primary col-span-3">Load Selected</button>
+              </div>
+              <div class="text-xs text-slate-400">Token tersimpan aman di server. <button class="info-btn" data-info="Token disimpan lokal di database, tidak dikirim balik ke client.">!</button></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Add & Test -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Add & Test <button class="info-btn" data-info="Tempel link VPN atau URL sumber (raw/API).">!</button></h2>
+          </div>
+          <div class="card-body space-y-3">
+            <textarea id="vpn-input" class="input h-28" placeholder="Tempel VPN links atau URL...\nvless://...\nhttps://raw.githubusercontent.com/...\nhttps://api.example.com/... "></textarea>
+            <div class="flex items-center gap-3">
+              <div class="segmented-group" role="tablist">
+                <button data-mode="accurate" class="segmented-item active">Accurate</button>
+                <button data-mode="fast" class="segmented-item">Fast</button>
+                <button data-mode="xray-only" class="segmented-item">Xray-Only</button>
+                <button data-mode="hybrid" class="segmented-item">Hybrid</button>
+              </div>
+              <input id="top-n" class="input w-24" type="number" min="1" max="999" value="20" title="Top‑N (Hybrid)" />
+              <button id="btn-add-test" class="btn btn-accent ml-auto">Add & Start</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right column -->
+      <section class="lg:col-span-7 space-y-6">
+        <!-- Live Testing -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Live Testing <button class="info-btn" data-info="Progres pengujian akun secara real‑time.">!</button></h2>
+          </div>
+          <div class="card-body space-y-4">
+            <div>
+              <div class="progress"><div id="progress-bar" class="progress-bar" style="width:0%"></div></div>
+              <div class="flex items-center justify-between text-xs text-slate-400 mt-1">
+                <div>Completed: <span id="completed-count">0</span>/<span id="total-count">0</span></div>
+                <div id="mode-pill" class="pill">Idle</div>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table class="table">
+                <thead>
+                  <tr>
+                    <th>Tag</th>
+                    <th>Type</th>
+                    <th>IP</th>
+                    <th>Latency</th>
+                    <th>Country</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="results-body">
+                  <!-- rows injected here -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Results & Actions -->
+        <div class="card">
+          <div class="card-header">
+            <h2 class="card-title">Results & Actions <button class="info-btn" data-info="Ringkasan hasil uji dan aksi ekspor.">!</button></h2>
+          </div>
+          <div class="card-body space-y-4">
+            <div class="grid grid-cols-3 gap-3 text-center">
+              <div class="stat"><div id="stat-success" class="stat-value">0</div><div class="stat-label">Success</div></div>
+              <div class="stat"><div id="stat-failed" class="stat-value">0</div><div class="stat-label">Failed</div></div>
+              <div class="stat"><div id="stat-latency" class="stat-value">–</div><div class="stat-label">Avg Latency</div></div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <input id="servers-input" class="input flex-1" placeholder="Custom servers (comma/newline)" />
+              <button id="btn-apply-servers" class="btn btn-soft">Apply Servers</button>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-3">
+              <a id="btn-export-json" class="btn" href="/api/export?format=json">Export JSON</a>
+              <a id="btn-export-csv" class="btn" href="/api/export?format=csv">Export CSV</a>
+              <div class="ml-auto flex items-center gap-3">
+                <button id="btn-download-config" class="btn btn-primary">Download Config</button>
+                <button id="btn-upload-github" class="btn btn-accent">Upload GitHub</button>
+              </div>
+            </div>
+
+            <div id="upload-panel" class="hidden grid grid-cols-5 gap-3">
+              <input id="commit-message" class="input col-span-5 md:col-span-4" placeholder="Commit message" />
+              <button id="btn-do-upload" class="btn btn-primary col-span-5 md:col-span-1">Upload</button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Socket.IO client -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js" integrity="sha384-nx6Uj3j8eCq5rZcYgZQmB0b5Qq7E6v3oWI3sQ/hw8IYv4vQ8P8b6L7zjK3h4B3qC" crossorigin="anonymous"></script>
+  <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>
