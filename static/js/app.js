@@ -249,22 +249,26 @@ async function doUpload(){
   } catch (err) { console.error(err); toast('Upload failed','error'); }
 }
 
+// Global error handler
+window.addEventListener('error', (e) => { try { toast(`Error: ${e.message}`, 'error'); } catch {} });
+window.addEventListener('unhandledrejection', (e) => { try { toast(`Request failed`, 'error'); } catch {} });
+
 // Init
 function bindEvents(){
   console.debug('[UI] bindEvents');
   bindInfoTips();
   bindRipple();
   $all('input[name="config-source"]').forEach(r=>r.addEventListener('change', () => { console.debug('[UI] source change'); switchSourceUI(); }));
-  $('#btn-load-config').addEventListener('click', () => { console.debug('[Action] loadConfig'); loadConfig(); });
-  $('#btn-save-gh').addEventListener('click', () => { console.debug('[Action] saveGitHub'); loadConfig(); });
-  $('#btn-list-gh').addEventListener('click', () => { console.debug('[Action] listGitHub'); listGithub(); });
-  $('#btn-load-gh').addEventListener('click', () => { console.debug('[Action] loadGitHubFile'); loadGithubFile(); });
-  $('#btn-add-test').addEventListener('click', () => { console.debug('[Action] addAndStart'); addAndStart(); });
+  const b1=$('#btn-load-config'); if (b1) b1.addEventListener('click', () => { toast('Loading config…','info'); console.debug('[Action] loadConfig'); loadConfig(); });
+  const b2=$('#btn-save-gh'); if (b2) b2.addEventListener('click', () => { toast('Saving GitHub…','info'); console.debug('[Action] saveGitHub'); loadConfig(); });
+  const b3=$('#btn-list-gh'); if (b3) b3.addEventListener('click', () => { toast('Listing files…','info'); console.debug('[Action] listGitHub'); listGithub(); });
+  const b4=$('#btn-load-gh'); if (b4) b4.addEventListener('click', () => { toast('Loading file…','info'); console.debug('[Action] loadGitHubFile'); loadGithubFile(); });
+  const b5=$('#btn-add-test'); if (b5) b5.addEventListener('click', () => { toast('Adding & starting…','info'); console.debug('[Action] addAndStart'); addAndStart(); });
   $all('.segmented-item').forEach(b=> b.addEventListener('click', ()=> { console.debug('[UI] setMode', b.getAttribute('data-mode')); setMode(b.getAttribute('data-mode')); }));
-  $('#btn-apply-servers').addEventListener('click', () => { console.debug('[Action] applyServers'); applyServers(); });
-  $('#btn-download-config').addEventListener('click', () => { console.debug('[Action] downloadConfig'); downloadConfig(); });
-  $('#btn-upload-github').addEventListener('click', () => { console.debug('[UI] toggleUploadPanel'); toggleUploadPanel(); });
-  $('#btn-do-upload').addEventListener('click', () => { console.debug('[Action] doUpload'); doUpload(); });
+  const b6=$('#btn-apply-servers'); if (b6) b6.addEventListener('click', () => { toast('Applying servers…','info'); console.debug('[Action] applyServers'); applyServers(); });
+  const b7=$('#btn-download-config'); if (b7) b7.addEventListener('click', () => { toast('Downloading…','info'); console.debug('[Action] downloadConfig'); downloadConfig(); });
+  const b8=$('#btn-upload-github'); if (b8) b8.addEventListener('click', () => { console.debug('[UI] toggleUploadPanel'); toggleUploadPanel(); });
+  const b9=$('#btn-do-upload'); if (b9) b9.addEventListener('click', () => { toast('Uploading…','info'); console.debug('[Action] doUpload'); doUpload(); });
 }
 
 async function bootstrap(){
