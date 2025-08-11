@@ -13,12 +13,16 @@ function getTotalValue(data) {
   return Number.isFinite(v) ? v : 0;
 }
 
-// Ripple position
-$all('.btn').forEach(b => b.addEventListener('pointerdown', e => {
-  const rect = b.getBoundingClientRect();
-  b.style.setProperty('--x', `${e.clientX - rect.left}px`);
-  b.style.setProperty('--y', `${e.clientY - rect.top}px`);
-}));
+// Ripple via delegation
+function bindRipple() {
+  document.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('.btn');
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    btn.style.setProperty('--x', `${e.clientX - rect.left}px`);
+    btn.style.setProperty('--y', `${e.clientY - rect.top}px`);
+  }, { passive: true });
+}
 
 // Toast
 function toast(message, type='info') {
@@ -30,26 +34,30 @@ function toast(message, type='info') {
   setTimeout(() => { el.remove(); }, 3000);
 }
 
-// Info popover (simple tooltip)
+// Info popover with toggle
 function bindInfoTips() {
-  $all('.info-btn').forEach(btn => {
-    let tip; const text = btn.getAttribute('data-info') || '';
-    btn.addEventListener('mouseenter', () => {
-      tip = document.createElement('div');
-      tip.className = 'toast';
-      tip.style.position = 'absolute';
-      tip.style.transform = 'translateY(8px)';
-      tip.style.whiteSpace = 'nowrap';
-      tip.textContent = text;
-      const r = btn.getBoundingClientRect();
-      tip.style.left = `${r.left - 8}px`;
-      tip.style.top = `${r.bottom + 6 + window.scrollY}px`;
-      tip.style.zIndex = 40;
-      document.body.appendChild(tip);
-    });
-    btn.addEventListener('mouseleave', () => tip && tip.remove());
-    btn.addEventListener('click', (e) => { e.preventDefault(); e.stopPropagation(); });
+  let currentTip = null;
+  function hideTip() { if (currentTip) { currentTip.remove(); currentTip = null; } }
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.info-btn');
+    if (!btn) { hideTip(); return; }
+    // Toggle
+    if (currentTip && currentTip.__owner === btn) { hideTip(); return; }
+    hideTip();
+    const tip = document.createElement('div');
+    tip.className = 'toast';
+    tip.style.position = 'absolute';
+    tip.style.whiteSpace = 'nowrap';
+    tip.textContent = btn.getAttribute('data-info') || '';
+    const r = btn.getBoundingClientRect();
+    tip.style.left = `${Math.max(12, r.left - 8)}px`;
+    tip.style.top = `${r.bottom + 6 + window.scrollY}px`;
+    tip.style.zIndex = 50;
+    tip.__owner = btn;
+    document.body.appendChild(tip);
+    currentTip = tip;
   });
+  window.addEventListener('scroll', () => { if (currentTip) { currentTip.remove(); currentTip = null; } });
 }
 
 // Status UI
@@ -78,18 +86,22 @@ function initSocket() {
   socket.on('connect', () => setStatus('Connected', 'success'));
   socket.on('disconnect', () => setStatus('Disconnected', 'warning'));
   socket.on('testing_update', data => {
-    const total = getTotalValue(data);
-    const completed = data.completed ?? data.results?.filter(r => !['WAIT','🔄','🔁'].includes(r.Status)).length ?? 0;
-    setProgress(completed, total);
-    renderRows(data.results || []);
+    try {
+      const total = getTotalValue(data);
+      const completed = data.completed ?? data.results?.filter(r => !['WAIT','🔄','🔁'].includes(r.Status)).length ?? 0;
+      setProgress(completed, total);
+      renderRows(data.results || []);
+    } catch (err) { console.error(err); }
   });
   socket.on('testing_complete', data => {
-    const total = data.total ?? getTotalValue(data);
-    setProgress(data.successful ?? 0, total);
-    results = data.results || [];
-    renderRows(results, true);
-    updateSummary(results);
-    toast('Testing complete', 'success');
+    try {
+      const total = data.total ?? getTotalValue(data);
+      setProgress(data.successful ?? 0, total);
+      results = data.results || [];
+      renderRows(results, true);
+      updateSummary(results);
+      toast('Testing complete', 'success');
+    } catch (err) { console.error(err); }
   });
   socket.on('testing_error', data => {
     toast(data?.message || 'Testing error', 'error');
@@ -140,69 +152,101 @@ async function api(path, opts){ const r = await fetch(path, opts); if(!r.ok) thr
 function currentSource(){ return document.querySelector('input[name="config-source"]:checked')?.value || 'template'; }
 function switchSourceUI(){ const gh = $('#github-panel'); if (currentSource()==='github') gh.classList.remove('hidden'); else gh.classList.add('hidden'); }
 
-// Actions
-async function loadConfig(){
-  if (currentSource()==='template') {
-    // Try direct template endpoint first
-    try { await api('/api/load-template-config'); } catch {}
-    const data = await api('/api/load-config', {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source:'local' })
-    });
-    if (data.success) { toast(data.message || 'Template loaded', 'success'); setStatus('Template loaded','success'); }
-    else { toast(data.message || 'Load failed','error'); setStatus('Load failed','error'); }
-  } else {
-    const token = $('#gh-token').value.trim(); const owner=$('#gh-owner').value.trim(); const repo=$('#gh-repo').value.trim();
-    if (token && owner && repo) {
-      const s = await api('/api/save-github-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,owner,repo})});
-      if (!s.success) { toast(s.message||'Save GitHub failed','error'); return; }
+// GitHub saved config
+async function loadSavedGitHub(){
+  try {
+    const d = await api('/api/get-github-config');
+    if (d.success) {
+      if (d.owner) $('#gh-owner').value = d.owner;
+      if (d.repo) $('#gh-repo').value = d.repo;
     }
-    toast('GitHub ready','success'); setStatus('GitHub ready','success');
-  }
+  } catch {}
 }
 
-async function listGithub(){ const f = await api('/api/list-github-files'); const sel = $('#gh-files'); sel.innerHTML=''; (f.files||[]).forEach(x=>{ const opt=document.createElement('option'); opt.value=x.path; opt.textContent=x.name; sel.appendChild(opt); }); }
-async function loadGithubFile(){ const file=$('#gh-files').value; if(!file){ toast('Select file','warning'); return; } const d=await api('/api/load-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'github',file_path:file})}); if(d.success){ toast(d.message||'Loaded','success'); } else { toast(d.message||'Load failed','error'); } }
+// Restore testing status
+async function restoreTesting(){
+  try {
+    const d = await api('/api/get-testing-status');
+    if (d.has_active_testing) {
+      const total = d.total ?? getTotalValue(d);
+      setProgress(d.completed ?? 0, total);
+      renderRows(d.results || []);
+      setStatus('Restored','success');
+    }
+  } catch {}
+}
+
+// Actions
+async function loadConfig(){
+  try {
+    if (currentSource()==='template') {
+      try { await api('/api/load-template-config'); } catch {}
+      const data = await api('/api/load-config', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source:'local' })
+      });
+      if (data.success) { toast(data.message || 'Template loaded', 'success'); setStatus('Template loaded','success'); }
+      else { toast(data.message || 'Load failed','error'); setStatus('Load failed','error'); }
+    } else {
+      const token = $('#gh-token').value.trim(); const owner=$('#gh-owner').value.trim(); const repo=$('#gh-repo').value.trim();
+      if (token && owner && repo) {
+        const s = await api('/api/save-github-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,owner,repo})});
+        if (!s.success) { toast(s.message||'Save GitHub failed','error'); return; }
+      }
+      toast('GitHub ready','success'); setStatus('GitHub ready','success');
+    }
+  } catch (err) { console.error(err); toast('Action failed','error'); }
+}
+
+async function listGithub(){ try { const f = await api('/api/list-github-files'); const sel = $('#gh-files'); sel.innerHTML=''; (f.files||[]).forEach(x=>{ const opt=document.createElement('option'); opt.value=x.path; opt.textContent=x.name; sel.appendChild(opt); }); toast('Files loaded','success'); } catch(err){ console.error(err); toast('List failed','error'); } }
+async function loadGithubFile(){ try { const file=$('#gh-files').value; if(!file){ toast('Select file','warning'); return; } const d=await api('/api/load-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'github',file_path:file})}); if(d.success){ toast(d.message||'Loaded','success'); } else { toast(d.message||'Load failed','error'); } } catch(err){ console.error(err); toast('Load failed','error'); } }
 
 // Add & Start
 function setMode(mode){ currentMode = mode; setModePill(mode); $all('.segmented-item').forEach(b=>b.classList.toggle('active', b.getAttribute('data-mode')===mode)); }
 async function addAndStart(){
-  const text = $('#vpn-input').value.trim(); if (!text){ toast('No input','warning'); return; }
-  // Ensure config loaded
-  if (currentSource()==='template') { try { await api('/api/load-template-config'); } catch {} await api('/api/load-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'local'})}); }
-  const res = await api('/api/add-links-and-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({links:text})});
-  if (!res.success){ toast(res.message||'Add failed','error'); return; }
-  const total = getTotalValue(res); setProgress(0,total); $('#vpn-input').value=''; toast('Starting tests…','info');
-  const payload = { mode: currentMode }; if (currentMode==='hybrid') { const n = parseInt($('#top-n').value||'20',10); payload.topN = isNaN(n)?20:Math.max(1,Math.min(999,n)); }
-  socket.emit('start_testing', payload);
+  try {
+    const text = $('#vpn-input').value.trim(); if (!text){ toast('No input','warning'); return; }
+    if (currentSource()==='template') { try { await api('/api/load-template-config'); } catch {} await api('/api/load-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'local'})}); }
+    const res = await api('/api/add-links-and-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({links:text})});
+    if (!res.success){ toast(res.message||'Add failed','error'); return; }
+    const total = getTotalValue(res); setProgress(0,total); $('#vpn-input').value=''; toast('Starting tests…','info');
+    const payload = { mode: currentMode }; if (currentMode==='hybrid') { const n = parseInt($('#top-n').value||'20',10); payload.topN = isNaN(n)?20:Math.max(1,Math.min(999,n)); }
+    socket.emit('start_testing', payload);
+  } catch (err) { console.error(err); toast('Start failed','error'); }
 }
 
 // Servers apply & Generate
 async function applyServers(){
-  const servers = $('#servers-input').value.trim();
-  const d = await api('/api/generate-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({custom_servers:servers})});
-  if (d.success) toast(`Config updated (${d.account_count} accounts)`, 'success'); else toast(d.message||'Generate failed','error');
+  try {
+    const servers = $('#servers-input').value.trim();
+    const d = await api('/api/generate-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({custom_servers:servers})});
+    if (d.success) toast(`Config updated (${d.account_count} accounts)`, 'success'); else toast(d.message||'Generate failed','error');
+  } catch (err) { console.error(err); toast('Generate failed','error'); }
 }
 
 // Download & Upload
 async function downloadConfig(){
-  // Try to fetch as blob and force download
-  const r = await fetch('/api/download-config');
-  if (!r.ok) { toast('No config to download','warning'); return; }
-  const blob = await r.blob();
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'VortexVpn.json'; a.click(); URL.revokeObjectURL(url);
+  try {
+    const r = await fetch('/api/download-config');
+    if (!r.ok) { toast('No config to download','warning'); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'VortexVpn.json'; a.click(); URL.revokeObjectURL(url);
+  } catch (err) { console.error(err); toast('Download failed','error'); }
 }
 
 function toggleUploadPanel(){ $('#upload-panel').classList.toggle('hidden'); }
 async function doUpload(){
-  const commit_message = $('#commit-message').value.trim() || 'Update VPN configuration';
-  const d = await api('/api/upload-to-github',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({commit_message})});
-  if (d.success) { toast(d.message||'Uploaded','success'); toggleUploadPanel(); } else { toast(d.message||'Upload failed','error'); }
+  try {
+    const commit_message = $('#commit-message').value.trim() || 'Update VPN configuration';
+    const d = await api('/api/upload-to-github',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({commit_message})});
+    if (d.success) { toast(d.message||'Uploaded','success'); toggleUploadPanel(); } else { toast(d.message||'Upload failed','error'); }
+  } catch (err) { console.error(err); toast('Upload failed','error'); }
 }
 
 // Init
 function bindEvents(){
   bindInfoTips();
+  bindRipple();
   $all('input[name="config-source"]').forEach(r=>r.addEventListener('change', switchSourceUI));
   $('#btn-load-config').addEventListener('click', loadConfig);
   $('#btn-save-gh').addEventListener('click', loadConfig);
@@ -222,4 +266,6 @@ window.addEventListener('DOMContentLoaded', async () => {
   bindEvents();
   setStatus('Ready','success');
   setMode('accurate');
+  await loadSavedGitHub();
+  await restoreTesting();
 });
