@@ -7,6 +7,11 @@ let totalAccounts = 0;
 
 // Initialize app when DOM is loaded
 document.addEventListener('DOMContentLoaded', function() {
+    // Theme init
+    try {
+        const saved = localStorage.getItem('theme');
+        if (saved === 'light') document.body.setAttribute('data-theme', 'light');
+    } catch (e) {}
     initializeApp();
 });
 
@@ -1822,3 +1827,16 @@ dynamicStyles.textContent = `
 `;
 
 document.head.appendChild(dynamicStyles);
+
+function toggleTheme() {
+    const isLight = document.body.getAttribute('data-theme') === 'light';
+    const next = isLight ? '' : 'light';
+    if (next) document.body.setAttribute('data-theme', next); else document.body.removeAttribute('data-theme');
+    try { localStorage.setItem('theme', next || 'dark'); } catch (e) {}
+}
+
+// Attach toggle if button exists
+(function(){
+    const btn = document.getElementById('theme-toggle');
+    if (btn) btn.addEventListener('click', toggleTheme);
+})();
