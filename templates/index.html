@@ -13,88 +13,10 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/ui-tailwind.css') }}">
 
-        /* Smart Detection Info */
-        .smart-detection-info {
-            margin-top: 1rem;
-            padding: 1rem;
-            background-color: rgba(99, 102, 241, 0.1); /* Primary with low opacity */
-            border-radius: 0.5rem;
-            border: 1px solid rgba(99, 102, 241, 0.3);
-        }
-
-        .detection-indicator {
-            display: flex;
-            align-items: center;
-            margin-bottom: 0.5rem;
-            color: var(--primary);
-            font-weight: 500;
-        }
-
-        .detection-icon {
-            font-size: 1.25rem;
-            margin-right: 0.5rem;
-        }
-
-        /* Stats Grid */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-            gap: 1rem;
-            text-align: center;
-        }
-
-        .stat-item {
-            background-color: var(--dark-3);
-            padding: 1rem;
-            border-radius: 0.5rem;
-            border: 1px solid var(--dark-3);
-        }
-
-        .stat-value {
-            display: block;
-            font-size: 1.875rem; /* text-3xl */
-            font-weight: 700; /* font-bold */
-            color: var(--primary);
-            margin-bottom: 0.25rem;
-        }
-
-        .stat-label {
-            font-size: 0.875rem; /* text-sm */
-            color: var(--light-2);
-            opacity: 0.8;
-        }
-
-        /* Progress Bar */
-        .progress-info {
-            display: flex;
-            justify-content: space-between;
-            font-size: 0.875rem;
-            margin-bottom: 0.5rem;
-            color: var(--light-2);
-        }
-
-        .progress-bar {
-            width: 100%;
-            height: 0.75rem;
-            background-color: var(--dark-3);
-            border-radius: 0.375rem;
-            overflow: hidden;
-        }
-
-        .progress-fill {
-            height: 100%;
-            width: 0%;
-            background-color: var(--primary);
-            border-radius: 0.375rem;
-            transition: width 0.3s ease-in-out;
-        }
-
-        .test-stats {
-            display: flex;
-            justify-content: space-around;
-            margin-top: 1rem;
-            font-size: 0.875rem;
-        }
+    <!-- Custom CSS moved to static/css/ui-tailwind.css -->
+</head>
+<body>
+    <!-- Loading Screen -->
 
         .test-stat-item {
             display: flex;
@@ -154,39 +76,6 @@
         .testing-table .status-failed { color: var(--danger); font-weight: 600; }
         .testing-table .status-testing { color: var(--warning); font-weight: 600; }
 
-        /* Summary Stats */
-        .summary-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 1.5rem;
-            text-align: center;
-        }
-
-        .summary-item {
-            background-color: var(--dark-3);
-            padding: 1.5rem;
-            border-radius: 0.75rem;
-            border: 1px solid var(--dark-3);
-        }
-
-        .summary-value {
-            display: block;
-            font-size: 2.25rem; /* text-4xl */
-            font-weight: 700;
-            color: var(--primary);
-            margin-bottom: 0.5rem;
-        }
-
-        .summary-label {
-            font-size: 1rem;
-            color: var(--light-2);
-            opacity: 0.8;
-        }
-
-        /* Filter Controls */
-        .filter-controls {
-            margin-bottom: 1rem;
-        }
 
         /* Config Info */
         .config-info {
