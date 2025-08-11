@@ -1694,6 +1694,13 @@ async function fetchAndAddAdvanced() {
             return;
         }
 
+        // Populate Smart VPN Input for visibility and detection
+        const smartInput = document.getElementById('vpn-links');
+        if (smartInput) {
+            smartInput.value = urls.join('\n');
+            try { updateSmartDetectionPreview(smartInput.value); } catch (_) {}
+        }
+
         updateStatus('Fetching advanced URLs…', 'info');
         logActivity('Advanced: Fetch & Add started');
 
