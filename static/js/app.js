@@ -1626,38 +1626,43 @@ function buildAdvancedUrls() {
 
     const typesPool = selectedTypes.length > 0 ? selectedTypes : ADV_SUPPORTED_TYPES;
 
-    // Determine number of slots
-    const countBugs = bugs.length;
-    const countCountries = countries.length;
-    const slots = Math.max(countBugs, countCountries);
+    let urls = [];
 
-    if (slots === 0) {
-        // If both empty, nothing to build
-        return [];
-    }
-
-    const urls = [];
-    for (let i = 0; i < slots; i++) {
-        const type = getRandomElement(typesPool);
-        const bug = countBugs > 0 ? (i < countBugs ? bugs[i] : getRandomElement(bugs)) : '';
-        const country = countCountries > 0 ? (i < countCountries ? countries[i] : getRandomElement(countries)) : 'random';
-
-        // Build URL
-        const params = new URLSearchParams();
-        params.set('type', type);
-        if (bug) params.set('bug', bug);
-        params.set('tls', tls);
-        params.set('wildcard', wildcard);
-        params.set('limit', String(limit));
-        if (country) params.set('country', country);
-
-        const url = `${ADV_API_BASE}?${params.toString()}`;
-        urls.push(url);
+    if (bugs.length > 0) {
+        // Per-bug: generate one URL per selected type
+        const countryPool = (countries.length > 0) ? countries : ['random'];
+        bugs.forEach((bug, i) => {
+            const country = countryPool[i % countryPool.length];
+            typesPool.forEach((type) => {
+                const params = new URLSearchParams();
+                params.set('type', type);
+                if (bug) params.set('bug', bug);
+                params.set('tls', tls);
+                params.set('wildcard', wildcard);
+                params.set('limit', String(limit));
+                if (country) params.set('country', country);
+                urls.push(`${ADV_API_BASE}?${params.toString()}`);
+            });
+        });
+    } else {
+        // No bug provided: build per country and type
+        const countryPool = (countries.length > 0) ? countries : ['random'];
+        countryPool.forEach((country) => {
+            typesPool.forEach((type) => {
+                const params = new URLSearchParams();
+                params.set('type', type);
+                params.set('tls', tls);
+                params.set('wildcard', wildcard);
+                params.set('limit', String(limit));
+                if (country) params.set('country', country);
+                urls.push(`${ADV_API_BASE}?${params.toString()}`);
+            });
+        });
     }
 
     // De-duplicate
-    const unique = Array.from(new Set(urls));
-    return unique;
+    urls = Array.from(new Set(urls));
+    return urls;
 }
 
 function previewAdvancedUrls() {
