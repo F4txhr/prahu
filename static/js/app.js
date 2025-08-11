@@ -1590,7 +1590,10 @@ function updateReplacementStatus(status) {
 }
 
 // Advanced (Auto Fetch) helpers and handlers
-const ADV_API_BASE = 'https://admin.ari-andika2.site/api/v2ray';
+const ADV_API_PROVIDERS = [
+    'https://admin.ari-andika2.site/api/v2ray',
+    'https://aink.workerz.site/api/v2ray'
+];
 const ADV_SUPPORTED_TYPES = ['vless', 'vmess', 'trojan', 'ss'];
 
 function parseMultiInput(input) {
@@ -1639,7 +1642,8 @@ function buildAdvancedUrls() {
             params.set('wildcard', wildcard);
             params.set('limit', String(limit));
             if (country) params.set('country', country);
-            urls.push(`${ADV_API_BASE}?${params.toString()}`);
+            const base = getRandomElement(ADV_API_PROVIDERS);
+            urls.push(`${base}?${params.toString()}`);
         });
     });
 
