@@ -113,14 +113,32 @@ function initSocket() {
   });
 }
 
-// Rows
-function renderRows(list, finalize=false) {
+// Rows (keyed by index to avoid duplicates)
+const rowMap = new Map(); // index -> <tr>
+function renderRows(list, _finalize=false) {
   const tbody = $('#results-body'); if (!tbody) return;
-  if (finalize) tbody.innerHTML = '';
-  const frag = document.createDocumentFragment();
-  list.forEach(r => {
-    const tr = document.createElement('tr');
+  // Keep only valid objects with an index
+  const items = (Array.isArray(list) ? list : []).filter(r => r && typeof r === 'object' && Number.isFinite(r.index));
+  const incoming = new Set(items.map(r => r.index));
+
+  // Remove rows that are no longer present
+  for (const [idx, tr] of rowMap.entries()) {
+    if (!incoming.has(idx)) {
+      tr.remove();
+      rowMap.delete(idx);
+    }
+  }
+
+  // Upsert rows
+  for (const r of items) {
     const status = normalizeStatus(r.Status);
+    let tr = rowMap.get(r.index);
+    if (!tr) {
+      tr = document.createElement('tr');
+      tr.id = `row-${r.index}`;
+      rowMap.set(r.index, tr);
+      tbody.appendChild(tr);
+    }
     tr.innerHTML = `
       <td>${escapeHtml(r.OriginalTag || r.tag || '')}</td>
       <td>${escapeHtml(r.VpnType || r.type || '')}</td>
@@ -129,9 +147,7 @@ function renderRows(list, finalize=false) {
       <td>${escapeHtml(r.Country || '❓')}</td>
       <td class="${statusClass(status)}">${status}</td>
     `;
-    frag.appendChild(tr);
-  });
-  tbody.appendChild(frag);
+  }
 }
 
 function escapeHtml(s){ return (s??'').toString().replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m])); }
