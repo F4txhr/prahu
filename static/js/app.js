@@ -1873,13 +1873,13 @@ function toggleTheme() {
     if (btn) btn.addEventListener('click', toggleTheme);
 })();
 
-// Wire FAB to startTesting on mobile
+// Wire FAB to Smart Process & Start Testing on mobile
 (function(){
     const fab = document.getElementById('fab-start');
     if (fab) {
         fab.style.display = 'inline-flex';
         fab.addEventListener('click', () => {
-            try { startTesting(); } catch (e) { console.warn('FAB start failed', e); }
+            try { addLinksAndTest(); } catch (e) { console.warn('FAB smart process failed', e); }
         });
     }
 })();
