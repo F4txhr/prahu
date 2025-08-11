@@ -273,14 +273,28 @@ function bindEvents(){
 
 async function bootstrap(){
   try {
+    console.debug('[BOOT] start');
+    // Sanity checks
+    if (!document || !document.body) throw new Error('DOM not ready');
+    if (typeof io === 'undefined') throw new Error('Socket.IO client not loaded');
+    if (!document.querySelector('#btn-add-test')) console.warn('[BOOT] UI button #btn-add-test not found (check template)');
+
     switchSourceUI();
+    console.debug('[BOOT] switchSourceUI ok');
     initSocket();
+    console.debug('[BOOT] socket ok');
     bindEvents();
+    console.debug('[BOOT] bind ok');
     setStatus('Ready','success');
     setMode('accurate');
     await loadSavedGitHub();
+    console.debug('[BOOT] github ok');
     await restoreTesting();
-  } catch (err) { console.error('Bootstrap error:', err); toast('Init failed','error'); }
+    console.debug('[BOOT] restore ok');
+  } catch (err) {
+    console.error('Bootstrap error:', err);
+    toast('Init failed','error');
+  }
 }
 if (document.readyState === 'loading') {
   window.addEventListener('DOMContentLoaded', bootstrap);
