@@ -79,6 +79,83 @@ function setProgress(completed, total) {
   $('#progress-bar').style.width = `${pct}%`;
 }
 
+// Completion-ordered view: show only completed items in order of completion
+const displayOrder = [];           // array of index in completion order
+const latestByIndex = new Map();   // index -> latest result snapshot
+const shownSet = new Set();        // indexes already rendered
+
+function isFinalStatus(s) { return s && !['WAIT','🔄','🔁'].includes(s); }
+function isFailureStatus(s) { return s === '❌' || s === 'Dead'; }
+function shouldShowResult(r) {
+  // Only show completed items
+  if (!isFinalStatus(r.Status)) return false;
+  // For two-phase modes, show second phase result for successes; failures can show as is
+  const twoPhase = (currentMode === 'hybrid' || currentMode === 'accurate');
+  if (twoPhase) {
+    if (r.Status === '✅') return !!r.XRAY; // show only XRAY successes
+    return true; // failures (❌/Dead) show
+  }
+  return true; // fast/xray-only
+}
+
+function resetTableState() {
+  displayOrder.length = 0;
+  latestByIndex.clear();
+  shownSet.clear();
+  rowMap.clear();
+  const tbody = $('#results-body'); if (tbody) tbody.innerHTML = '';
+}
+
+function processResults(list) {
+  if (!Array.isArray(list)) return;
+  for (const r of list) {
+    if (!r || typeof r !== 'object' || !Number.isFinite(r.index)) continue;
+    latestByIndex.set(r.index, r);
+    if (shouldShowResult(r)) {
+      if (!shownSet.has(r.index)) {
+        // first time eligible -> append to display order
+        shownSet.add(r.index);
+        displayOrder.push(r.index);
+        upsertRow(r);
+      } else {
+        // update existing row with newer snapshot (e.g., XRAY phase)
+        upsertRow(r);
+      }
+    }
+  }
+}
+
+function upsertRow(r) {
+  const tbody = $('#results-body'); if (!tbody) return;
+  const status = normalizeStatus(r.Status);
+  let tr = rowMap.get(r.index);
+  if (!tr) {
+    tr = document.createElement('tr');
+    tr.id = `row-${r.index}`;
+    rowMap.set(r.index, tr);
+    tbody.appendChild(tr);
+  }
+  tr.innerHTML = `
+    <td>${escapeHtml(r.OriginalTag || r.tag || '')}</td>
+    <td>${escapeHtml(r.VpnType || r.type || '')}</td>
+    <td>${escapeHtml(r['Tested IP'] || r.server || '-')}</td>
+    <td>${fmtLatency(r.Latency)}</td>
+    <td>${escapeHtml(r.Country || '❓')}</td>
+    <td class="${statusClass(status)}">${status}</td>
+  `;
+}
+
+function rerenderTableInCompletionOrder() {
+  const tbody = $('#results-body'); if (!tbody) return;
+  const frag = document.createDocumentFragment();
+  for (const idx of displayOrder) {
+    const tr = rowMap.get(idx);
+    if (tr) frag.appendChild(tr);
+  }
+  tbody.innerHTML = '';
+  tbody.appendChild(frag);
+}
+
 // Socket
 function initSocket() {
   if (socket) socket.disconnect();
@@ -88,19 +165,19 @@ function initSocket() {
   socket.on('testing_update', data => {
     try {
       const total = getTotalValue(data);
-      const completed = data.completed ?? data.results?.filter(r => !['WAIT','🔄','🔁'].includes(r.Status)).length ?? 0;
+      const completed = data.completed ?? data.results?.filter(r => isFinalStatus(r.Status)).length ?? 0;
       setProgress(completed, total);
-      // Replace rows on each update to avoid duplicates
-      renderRows(data.results || [], true);
+      processResults(data.results || []);
+      rerenderTableInCompletionOrder();
     } catch (err) { console.error(err); }
   });
   socket.on('testing_complete', data => {
     try {
       const total = data.total ?? getTotalValue(data);
       setProgress(data.successful ?? 0, total);
-      results = data.results || [];
-      renderRows(results, true);
-      updateSummary(results);
+      processResults(data.results || []);
+      rerenderTableInCompletionOrder();
+      updateSummary((data.results || []).filter(shouldShowResult));
       toast('Testing complete', 'success');
     } catch (err) { console.error(err); }
   });
@@ -231,6 +308,7 @@ async function addAndStart(){
     if (currentSource()==='template') { try { await api('/api/load-template-config'); } catch {} await api('/api/load-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'local'})}); }
     const res = await api('/api/add-links-and-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({links:text})});
     if (!res.success){ toast(res.message||'Add failed','error'); return; }
+    resetTableState();
     const total = getTotalValue(res); setProgress(0,total); $('#vpn-input').value=''; toast('Starting tests…','info');
     const payload = { mode: currentMode }; if (currentMode==='hybrid') { const n = parseInt($('#top-n').value||'20',10); payload.topN = isNaN(n)?20:Math.max(1,Math.min(999,n)); }
     socket.emit('start_testing', payload);
