@@ -146,7 +146,13 @@ function updateSummary(list){
 }
 
 // API
-async function api(path, opts){ const r = await fetch(path, opts); if(!r.ok) throw new Error(`${r.status}`); return r.json(); }
+async function api(path, opts){
+  console.debug('[API]', path, opts?.method || 'GET');
+  const r = await fetch(path, opts);
+  console.debug('[API][resp]', path, r.status);
+  if(!r.ok) throw new Error(`${r.status}`);
+  return r.json();
+}
 
 // Config Source UI
 function currentSource(){ return document.querySelector('input[name="config-source"]:checked')?.value || 'template'; }
@@ -245,27 +251,35 @@ async function doUpload(){
 
 // Init
 function bindEvents(){
+  console.debug('[UI] bindEvents');
   bindInfoTips();
   bindRipple();
-  $all('input[name="config-source"]').forEach(r=>r.addEventListener('change', switchSourceUI));
-  $('#btn-load-config').addEventListener('click', loadConfig);
-  $('#btn-save-gh').addEventListener('click', loadConfig);
-  $('#btn-list-gh').addEventListener('click', listGithub);
-  $('#btn-load-gh').addEventListener('click', loadGithubFile);
-  $('#btn-add-test').addEventListener('click', addAndStart);
-  $all('.segmented-item').forEach(b=> b.addEventListener('click', ()=> setMode(b.getAttribute('data-mode'))));
-  $('#btn-apply-servers').addEventListener('click', applyServers);
-  $('#btn-download-config').addEventListener('click', downloadConfig);
-  $('#btn-upload-github').addEventListener('click', toggleUploadPanel);
-  $('#btn-do-upload').addEventListener('click', doUpload);
+  $all('input[name="config-source"]').forEach(r=>r.addEventListener('change', () => { console.debug('[UI] source change'); switchSourceUI(); }));
+  $('#btn-load-config').addEventListener('click', () => { console.debug('[Action] loadConfig'); loadConfig(); });
+  $('#btn-save-gh').addEventListener('click', () => { console.debug('[Action] saveGitHub'); loadConfig(); });
+  $('#btn-list-gh').addEventListener('click', () => { console.debug('[Action] listGitHub'); listGithub(); });
+  $('#btn-load-gh').addEventListener('click', () => { console.debug('[Action] loadGitHubFile'); loadGithubFile(); });
+  $('#btn-add-test').addEventListener('click', () => { console.debug('[Action] addAndStart'); addAndStart(); });
+  $all('.segmented-item').forEach(b=> b.addEventListener('click', ()=> { console.debug('[UI] setMode', b.getAttribute('data-mode')); setMode(b.getAttribute('data-mode')); }));
+  $('#btn-apply-servers').addEventListener('click', () => { console.debug('[Action] applyServers'); applyServers(); });
+  $('#btn-download-config').addEventListener('click', () => { console.debug('[Action] downloadConfig'); downloadConfig(); });
+  $('#btn-upload-github').addEventListener('click', () => { console.debug('[UI] toggleUploadPanel'); toggleUploadPanel(); });
+  $('#btn-do-upload').addEventListener('click', () => { console.debug('[Action] doUpload'); doUpload(); });
 }
 
-window.addEventListener('DOMContentLoaded', async () => {
-  switchSourceUI();
-  initSocket();
-  bindEvents();
-  setStatus('Ready','success');
-  setMode('accurate');
-  await loadSavedGitHub();
-  await restoreTesting();
-});
+async function bootstrap(){
+  try {
+    switchSourceUI();
+    initSocket();
+    bindEvents();
+    setStatus('Ready','success');
+    setMode('accurate');
+    await loadSavedGitHub();
+    await restoreTesting();
+  } catch (err) { console.error('Bootstrap error:', err); toast('Init failed','error'); }
+}
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+  bootstrap();
+}
