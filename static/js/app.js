@@ -223,11 +223,48 @@ function setupEventListeners() {
         radio.addEventListener('change', handleConfigSourceChange);
     });
     
-    // Filter controls
-    const filterStatus = document.getElementById('filter-status');
-    if (filterStatus) {
-        filterStatus.addEventListener('change', filterResults);
+    // Add links and test
+    document.getElementById('add-and-test-btn').addEventListener('click', addLinksAndTest);
+    
+    // Smart detection preview
+    document.getElementById('vpn-links').addEventListener('input', function() {
+        updateSmartDetectionPreview(this.value);
+    });
+    
+    // Input change handler for replacement stats (auto-update)
+    document.getElementById('replacement-servers').addEventListener('input', updateReplacementStats);
+    
+    // Download configuration
+    const dlBtn = document.getElementById('download-config-btn');
+    if (dlBtn) dlBtn.addEventListener('click', downloadConfiguration);
+    
+    // Upload to GitHub
+    const upBtn = document.getElementById('upload-github-btn');
+    if (upBtn) upBtn.addEventListener('click', uploadToGitHub);
+
+    // Advanced (Auto Fetch) handlers
+    const toggleBtn = document.getElementById('toggle-advanced');
+    const advPanel = document.getElementById('advanced-panel');
+    const advDesc = document.getElementById('adv-desc');
+    const advInfo = document.getElementById('adv-info-btn');
+    if (toggleBtn && advPanel) {
+        toggleBtn.addEventListener('click', () => {
+            const show = advPanel.style.display === 'none';
+            advPanel.style.display = show ? 'block' : 'none';
+            toggleBtn.textContent = show ? 'Hide' : 'Show';
+        });
     }
+    if (advInfo && advDesc) {
+        advInfo.addEventListener('click', () => {
+            const show = advDesc.style.display === 'none';
+            advDesc.style.display = show ? 'block' : 'none';
+            advInfo.setAttribute('aria-expanded', String(show));
+        });
+    }
+    const advPreviewBtn = document.getElementById('adv-preview-btn');
+    const advFetchAddBtn = document.getElementById('adv-fetch-add-btn');
+    if (advPreviewBtn) advPreviewBtn.addEventListener('click', previewAdvancedUrls);
+    if (advFetchAddBtn) advFetchAddBtn.addEventListener('click', fetchAndAddAdvanced);
 }
 
 // Setup form handlers
