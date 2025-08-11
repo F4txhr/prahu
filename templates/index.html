@@ -17,11 +17,6 @@
 </head>
 <body>
     <!-- Loading Screen -->
-
-
-</head>
-<body>
-    <!-- Loading Screen -->
     <div id="loading-screen" class="loading-screen">
         <div class="loading-content">
             <div class="vortex-logo">
@@ -140,7 +135,7 @@
                     </div>
 
                     <!-- GitHub Setup Card (shown when GitHub option selected) -->
-                    <div class="card mt-6" id="github-setup-card" style="display: none;">
+                    <div class="card mt-6" id="github-setup-card">
                         <div class="card-header">
                             <h3>🐙 GitHub Configuration</h3>
                             <span class="badge" id="github-status">Not Configured</span>
@@ -163,7 +158,7 @@
                             </div>
                             
                             <!-- GitHub File Selection -->
-                            <div id="github-file-selection" style="display: none;">
+                            <div id="github-file-selection">
                                 <div class="form-group">
                                     <label for="github-files">Select Configuration File</label>
                                     <select id="github-files" class="input-field">
@@ -192,7 +187,7 @@
                     </div>
 
                     <!-- Setup Status -->
-                    <div class="card mt-6" id="setup-status" style="display: none;">
+                    <div class="card mt-6" id="setup-status">
                         <div class="card-content">
                             <div class="status-message text-light-2" id="setup-status-message"></div>
                         </div>
@@ -300,7 +295,7 @@
                             <h3 class="flex items-center gap-2">🔧 Advanced</h3>
                             <button class="btn btn-secondary px-4 py-2 text-sm" id="toggle-advanced">Show</button>
                         </div>
-                        <div class="card-content" id="advanced-panel" style="display:none;">
+                        <div class="card-content" id="advanced-panel">
                             <div class="form-group">
                                 <label>Types (multi-select)</label>
                                 <div class="flex gap-3 flex-wrap">
@@ -366,7 +361,7 @@
                                 ></textarea>
                                 <small class="text-xs text-light-2 opacity-70 mt-1 block">💡 These servers will be automatically applied when testing completes. Leave empty to use original servers.</small>
                             </div>
-                            <div class="replacement-stats" id="replacement-stats" style="display: none;">
+                            <div class="replacement-stats" id="replacement-stats">
                                 <div class="stats-row">
                                     <div class="stat-item">
                                         <span class="stat-value" id="total-vpn-accounts">0</span>
@@ -393,7 +388,7 @@
                     </div>
 
                     <!-- Quick Stats -->
-                    <div class="card mt-6" id="quick-stats" style="display: none;">
+                    <div class="card mt-6" id="quick-stats">
                         <div class="card-header">
                             <h3>Quick Summary</h3>
                         </div>
@@ -420,7 +415,7 @@
                     </div>
 
                     <!-- Progress -->
-                    <div class="card" id="testing-progress" style="display: none;">
+                    <div class="card" id="testing-progress">
                         <div class="card-header">
                             <h3>Testing Progress</h3>
                         </div>
@@ -450,7 +445,7 @@
                     </div>
 
                     <!-- Live Results Table -->
-                    <div class="card mt-6" id="live-results" style="display: none;">
+                    <div class="card mt-6" id="live-results">
                         <div class="card-header">
                             <h3>Live Test Results</h3>
                             <small class="text-xs text-light-2 opacity-70">Updated in real-time</small>
@@ -480,7 +475,7 @@
                     </div>
 
                     <!-- Auto-generated Config Notification -->
-                    <div class="card mt-6" id="config-notification" style="display: none;">
+                    <div class="card mt-6" id="config-notification">
                         <div class="card-header">
                             <h3>✅ Configuration Generated!</h3>
                         </div>
@@ -503,7 +498,7 @@
                     </div>
 
                     <!-- Results Summary -->
-                    <div class="card" id="results-summary" style="display: none;">
+                    <div class="card" id="results-summary">
                         <div class="card-header">
                             <h3>Summary</h3>
                         </div>
@@ -526,7 +521,7 @@
                     </div>
 
                     <!-- Detailed Results -->
-                    <div class="card mt-6" id="detailed-results" style="display: none;">
+                    <div class="card mt-6" id="detailed-results">
                         <div class="card-header">
                             <h3>Detailed Results</h3>
                             <div class="filter-controls">
