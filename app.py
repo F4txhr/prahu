@@ -108,6 +108,10 @@ def fetch_vpn_links_from_url(url, url_type='auto'):
 def index():
     return render_template('index.html')
 
+@app.route('/favicon.ico')
+def _favicon_no_content():
+    return ('', 204)
+
 @app.route('/api/setup-github', methods=['POST'])
 def setup_github():  # legacy endpoint, superseded by save_github_config
     data = request.json
