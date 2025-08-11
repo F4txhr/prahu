@@ -302,24 +302,17 @@ function handleConfigSourceChange(event) {
 function updateStatus(text, type = 'info') {
     const statusText = document.getElementById('status-text');
     const statusDot = document.querySelector('.status-dot');
+    const statusSummary = document.getElementById('status-summary');
     
-    statusText.textContent = text;
+    if (statusText) statusText.textContent = text;
+    if (statusSummary) statusSummary.textContent = text;
     
-    // Remove existing status classes
-    statusDot.classList.remove('success', 'error', 'warning', 'info');
-    
-    // Add new status class
-    statusDot.classList.add(type);
-    
-    // Update CSS custom property for status color
-    const colors = {
-        success: '#10b981',
-        error: '#ef4444',
-        warning: '#f59e0b',
-        info: '#3b82f6'
-    };
-    
-    statusDot.style.background = colors[type] || colors.info;
+    if (statusDot) {
+        statusDot.classList.remove('success', 'error', 'warning', 'info');
+        statusDot.classList.add(type);
+        const colors = { success: '#10b981', error: '#ef4444', warning: '#f59e0b', info: '#3b82f6' };
+        statusDot.style.background = colors[type] || colors.info;
+    }
 }
 
 // Show toast notification
@@ -827,7 +820,6 @@ function updateTestingProgress(data) {
     
     console.log(`🔍 DEBUG: Processing ${data.results.length} results`);
     
-    // Better status detection - exclude only pending states
     const pendingStates = ['WAIT', '🔄', '🔁'];
     const completed = data.results.filter(r => !pendingStates.includes(r.Status)).length;
     const total = data.total || data.results.length;
@@ -835,18 +827,21 @@ function updateTestingProgress(data) {
     
     updateProgressBar(percentage);
     
-    // Update progress text
-    document.getElementById('progress-text').textContent = `${completed} / ${total} accounts tested`;
-    document.getElementById('progress-percent').textContent = `${percentage}%`;
+    const progressTextEl = document.getElementById('progress-text');
+    const progressPctEl = document.getElementById('progress-percent');
+    if (progressTextEl) progressTextEl.textContent = `${completed} / ${total} accounts tested`;
+    if (progressPctEl) progressPctEl.textContent = `${percentage}%`;
     
-    // Count stats - use emoji status
     const successful = data.results.filter(r => r.Status === '✅' || r.Status === '●').length;
     const failed = data.results.filter(r => r.Status === '❌' || r.Status.startsWith('✖')).length;
     const testing = data.results.filter(r => pendingStates.includes(r.Status)).length;
     
     updateTestStats(successful, failed, testing);
     
-    // Update live results table
+    // New status bar fill
+    const statusFill = document.getElementById('status-fill');
+    if (statusFill) statusFill.style.width = percentage + '%';
+    
     updateLiveResults(data.results);
     
     updateStatus(`Testing... ${completed}/${total}`, 'info');
@@ -1839,4 +1834,15 @@ function toggleTheme() {
 (function(){
     const btn = document.getElementById('theme-toggle');
     if (btn) btn.addEventListener('click', toggleTheme);
+})();
+
+// Wire FAB to startTesting on mobile
+(function(){
+    const fab = document.getElementById('fab-start');
+    if (fab) {
+        fab.style.display = 'inline-flex';
+        fab.addEventListener('click', () => {
+            try { startTesting(); } catch (e) { console.warn('FAB start failed', e); }
+        });
+    }
 })();
