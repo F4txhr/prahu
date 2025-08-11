@@ -1622,47 +1622,28 @@ function getAdvancedSelections() {
 }
 
 function buildAdvancedUrls() {
-    const { selectedTypes, bugs, countries, tls, wildcard, limit } = getAdvancedSelections();
+    const { selectedTypes, countries, tls, wildcard, limit } = getAdvancedSelections();
 
     const typesPool = selectedTypes.length > 0 ? selectedTypes : ADV_SUPPORTED_TYPES;
+    const countryPool = (countries.length > 0) ? countries : ['random'];
 
-    let urls = [];
-
-    if (bugs.length > 0) {
-        // Per-bug: generate one URL per selected type
-        const countryPool = (countries.length > 0) ? countries : ['random'];
-        bugs.forEach((bug, i) => {
-            const country = countryPool[i % countryPool.length];
-            typesPool.forEach((type) => {
-                const params = new URLSearchParams();
-                params.set('type', type);
-                if (bug) params.set('bug', bug);
-                params.set('tls', tls);
-                params.set('wildcard', wildcard);
-                params.set('limit', String(limit));
-                if (country) params.set('country', country);
-                urls.push(`${ADV_API_BASE}?${params.toString()}`);
-            });
+    const urls = [];
+    countryPool.forEach((country) => {
+        typesPool.forEach((type) => {
+            const params = new URLSearchParams();
+            params.set('type', type);
+            // Bug random only per requirement
+            params.set('bug', 'random');
+            params.set('tls', tls);
+            params.set('wildcard', wildcard);
+            params.set('limit', String(limit));
+            if (country) params.set('country', country);
+            urls.push(`${ADV_API_BASE}?${params.toString()}`);
         });
-    } else {
-        // No bug provided: build per country and type
-        const countryPool = (countries.length > 0) ? countries : ['random'];
-        countryPool.forEach((country) => {
-            typesPool.forEach((type) => {
-                const params = new URLSearchParams();
-                params.set('type', type);
-                params.set('tls', tls);
-                params.set('wildcard', wildcard);
-                params.set('limit', String(limit));
-                if (country) params.set('country', country);
-                urls.push(`${ADV_API_BASE}?${params.toString()}`);
-            });
-        });
-    }
+    });
 
     // De-duplicate
-    urls = Array.from(new Set(urls));
-    return urls;
+    return Array.from(new Set(urls));
 }
 
 function previewAdvancedUrls() {
