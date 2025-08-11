@@ -83,6 +83,7 @@ function setProgress(completed, total) {
 const displayOrder = [];           // array of index in completion order
 const latestByIndex = new Map();   // index -> latest result snapshot
 const shownSet = new Set();        // indexes already rendered
+const skeletonSet = new Set(); // indexes with active skeleton placeholder
 
 function isFinalStatus(s) { return s && !['WAIT','🔄','🔁'].includes(s); }
 function isFailureStatus(s) { return s === '❌' || s === 'Dead'; }
@@ -102,8 +103,35 @@ function resetTableState() {
   displayOrder.length = 0;
   latestByIndex.clear();
   shownSet.clear();
+  skeletonSet.clear(); // Clear skeleton set on reset
   rowMap.clear();
   const tbody = $('#results-body'); if (tbody) tbody.innerHTML = '';
+}
+
+function insertSkeletonBelow(idx) {
+  const tbody = $('#results-body'); if (!tbody) return;
+  if (skeletonSet.has(idx)) return;
+  const sk = document.createElement('tr');
+  sk.className = 'skel-row';
+  sk.id = `skel-${idx}`;
+  sk.innerHTML = `
+    <td><span class="skeleton-line lg"></span></td>
+    <td><span class="skeleton-line sm"></span></td>
+    <td><span class="skeleton-line md"></span></td>
+    <td><span class="skeleton-line sm"></span></td>
+    <td><span class="skeleton-line sm"></span></td>
+    <td><span class="skeleton-line md"></span></td>
+  `;
+  const tr = rowMap.get(idx);
+  if (tr && tr.nextSibling) tr.parentNode.insertBefore(sk, tr.nextSibling);
+  else tbody.appendChild(sk);
+  skeletonSet.add(idx);
+}
+
+function removeSkeleton(idx) {
+  const el = document.getElementById(`skel-${idx}`);
+  if (el) el.remove();
+  skeletonSet.delete(idx);
 }
 
 function processResults(list) {
@@ -111,16 +139,34 @@ function processResults(list) {
   for (const r of list) {
     if (!r || typeof r !== 'object' || !Number.isFinite(r.index)) continue;
     latestByIndex.set(r.index, r);
-    if (shouldShowResult(r)) {
-      if (!shownSet.has(r.index)) {
-        // first time eligible -> append to display order
+    const twoPhase = (currentMode === 'hybrid' || currentMode === 'accurate');
+
+    // Handle phase transitions
+    if (twoPhase) {
+      // If phase1 success (non-xray success) just completed, show placeholder skeleton row (subtle preview)
+      if (r.Status === '✅' && !r.XRAY && !shownSet.has(r.index)) {
+        // Do not show final row yet; just mark as completed placeholder in order
         shownSet.add(r.index);
         displayOrder.push(r.index);
-        upsertRow(r);
-      } else {
-        // update existing row with newer snapshot (e.g., XRAY phase)
-        upsertRow(r);
+        // Render a soft placeholder for this index
+        upsertRow({ ...r, Status: '🔄' });
+        insertSkeletonBelow(r.index);
+        continue; // skip showing as final in phase1
       }
+      // If final XRAY success arrives, replace row and remove skeleton
+      if (r.Status === '✅' && r.XRAY) {
+        // Ensure in order if not already
+        if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); }
+        upsertRow(r);
+        removeSkeleton(r.index);
+        continue;
+      }
+    }
+
+    // For failures or single-phase modes, show normally when final
+    if (shouldShowResult(r)) {
+      if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); }
+      upsertRow(r);
     }
   }
 }
