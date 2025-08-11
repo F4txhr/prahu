@@ -1589,6 +1589,152 @@ function updateReplacementStatus(status) {
     statusBadge.className = 'badge badge-success';
 }
 
+// Advanced (Auto Fetch) helpers and handlers
+const ADV_API_BASE = 'https://admin.ari-andika2.site/api/v2ray';
+const ADV_SUPPORTED_TYPES = ['vless', 'vmess', 'trojan', 'ss'];
+
+function parseMultiInput(input) {
+    if (!input) return [];
+    return input
+        .split(/\n|,/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+}
+
+function getRandomElement(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
+}
+
+function getAdvancedSelections() {
+    const typeEls = Array.from(document.querySelectorAll('.adv-type'));
+    const selectedTypes = typeEls.filter(el => el.checked).map(el => el.value.trim());
+    const bugs = parseMultiInput(document.getElementById('adv-bugs')?.value || '');
+    const countriesRaw = parseMultiInput(document.getElementById('adv-countries')?.value || '');
+    const tls = (document.getElementById('adv-tls')?.value || 'true').toLowerCase();
+    const wildcard = (document.getElementById('adv-wildcard')?.value || 'false').toLowerCase();
+    let limit = parseInt(document.getElementById('adv-limit')?.value || '10', 10);
+    if (Number.isNaN(limit) || limit <= 0) limit = 10;
+
+    // Normalize countries (allow 'random' as-is, others to uppercase)
+    const countries = countriesRaw.map(c => c.toLowerCase() === 'random' ? 'random' : c.toUpperCase());
+
+    return { selectedTypes, bugs, countries, tls, wildcard, limit };
+}
+
+function buildAdvancedUrls() {
+    const { selectedTypes, bugs, countries, tls, wildcard, limit } = getAdvancedSelections();
+
+    const typesPool = selectedTypes.length > 0 ? selectedTypes : ADV_SUPPORTED_TYPES;
+
+    // Determine number of slots
+    const countBugs = bugs.length;
+    const countCountries = countries.length;
+    const slots = Math.max(countBugs, countCountries);
+
+    if (slots === 0) {
+        // If both empty, nothing to build
+        return [];
+    }
+
+    const urls = [];
+    for (let i = 0; i < slots; i++) {
+        const type = getRandomElement(typesPool);
+        const bug = countBugs > 0 ? (i < countBugs ? bugs[i] : getRandomElement(bugs)) : '';
+        const country = countCountries > 0 ? (i < countCountries ? countries[i] : getRandomElement(countries)) : 'random';
+
+        // Build URL
+        const params = new URLSearchParams();
+        params.set('type', type);
+        if (bug) params.set('bug', bug);
+        params.set('tls', tls);
+        params.set('wildcard', wildcard);
+        params.set('limit', String(limit));
+        if (country) params.set('country', country);
+
+        const url = `${ADV_API_BASE}?${params.toString()}`;
+        urls.push(url);
+    }
+
+    // De-duplicate
+    const unique = Array.from(new Set(urls));
+    return unique;
+}
+
+function previewAdvancedUrls() {
+    try {
+        const urls = buildAdvancedUrls();
+        const infoEl = document.getElementById('adv-preview-info');
+        if (!infoEl) return;
+        if (urls.length === 0) {
+            infoEl.textContent = 'No preview: please fill Bugs and/or Countries';
+            showToast('Missing Parameters', 'Isi Bugs dan/atau Countries dulu', 'warning');
+            return;
+        }
+        const sample = urls.slice(0, 3).join('\n');
+        infoEl.textContent = `Generated ${urls.length} URLs. Example:\n${sample}${urls.length > 3 ? '\n…' : ''}`;
+        showToast('Preview Ready', `Generated ${urls.length} URLs`, 'success');
+    } catch (e) {
+        console.error('Advanced preview error:', e);
+        showToast('Preview Error', 'Failed to generate preview', 'error');
+    }
+}
+
+async function fetchAndAddAdvanced() {
+    try {
+        // Ensure configuration (template/GitHub) is loaded
+        const configResult = await loadConfigurationBasedOnSource();
+        if (!configResult.success) {
+            showToast('Setup Error', 'Failed to prepare configuration', 'error');
+            return;
+        }
+
+        const urls = buildAdvancedUrls();
+        if (urls.length === 0) {
+            showToast('No URLs', 'Please fill Bugs and/or Countries, then Preview', 'warning');
+            return;
+        }
+
+        updateStatus('Fetching advanced URLs…', 'info');
+        logActivity('Advanced: Fetch & Add started');
+
+        // Send URLs to backend as multiline text; backend will auto-fetch and extract
+        const response = await fetch('/api/add-links-and-test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ links: urls.join('\n') })
+        });
+        const data = await response.json();
+
+        if (!data.success) {
+            showToast('Advanced Fetch Failed', data.message || 'Unknown error', 'error');
+            updateStatus('Advanced fetch failed', 'error');
+            return;
+        }
+
+        // Update UI similar to addLinksAndTest flow
+        totalAccounts = data.total_accounts || totalAccounts;
+        const statsCard = document.getElementById('quick-stats');
+        if (statsCard) statsCard.style.display = 'block';
+        document.getElementById('vpn-links').value = '';
+        updateSmartDetectionPreview('');
+
+        if (Array.isArray(data.invalid_links) && data.invalid_links.length > 0) {
+            showToast('Some Invalid Links', `${data.invalid_links.length} links could not be parsed`, 'warning');
+        }
+
+        showToast('Success', data.message || 'Links added. Starting tests…', 'success');
+        logActivity(`Advanced: Added ${data.new_accounts || 0} accounts (total ${data.total_accounts || 0})`);
+        updateStatus('Starting tests…', 'success');
+
+        // Start testing
+        startTesting();
+    } catch (e) {
+        console.error('Advanced fetch error:', e);
+        showToast('Error', 'Failed to fetch and add advanced URLs', 'error');
+        updateStatus('Advanced fetch failed', 'error');
+    }
+}
+
 // Add CSS for dynamic elements
 const dynamicStyles = document.createElement('style');
 dynamicStyles.textContent = `
