@@ -204,11 +204,17 @@ function ensureGlobalSkeleton(pending) {
 }
 
 function cleanTag(tag) {
-  const s = (tag||'').toString();
-  // Hilangkan emoji bendera dan kode negara (2 huruf) di awal/akhir
-  const withoutFlag = s.replace(/[\uD83C][\uDFFB-\uDFFF]?|\p{Extended_Pictographic}/gu, '');
-  const withoutCode = withoutFlag.replace(/^\s*\(?[A-Z]{2}\)?\s*[-|–]?\s*/i, '').replace(/\s*[-|–]?\s*\(?[A-Z]{2}\)?\s*$/i, '');
-  return withoutCode.trim().replace(/\s{2,}/g,' ');
+  let s = (tag || '').toString();
+  // Hapus emoji bendera: pasangan regional indicator symbols
+  try { s = s.replace(/[\u{1F1E6}-\u{1F1FF}]{2}/gu, ''); } catch {}
+  // Hapus kode negara dalam kurung di mana pun: (FR), (SG), dll
+  s = s.replace(/\(\s*[A-Z]{2}\s*\)/g, '');
+  // Hapus kode negara 2 huruf di awal/akhir dengan pemisah opsional
+  s = s.replace(/^\s*(?:[-|–\/+,.;])?\s*[A-Z]{2}\s*(?:[-|–\/+,.;])?\s*/i, '');
+  s = s.replace(/\s*(?:[-|–\/+,.;])?\s*[A-Z]{2}\s*(?:[-|–\/+,.;])?\s*$/i, '');
+  // Bersihkan spasi berlebih dan punctuation di tepi
+  s = s.replace(/\s{2,}/g, ' ').replace(/^[^A-Za-z0-9]+/, '').replace(/[^A-Za-z0-9]+$/, '');
+  return s.trim();
 }
 function truncate(str, max){ const s=(str||'').toString(); return s.length>max ? s.slice(0,max-1)+'…' : s; }
 
