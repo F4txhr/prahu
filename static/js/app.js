@@ -86,6 +86,9 @@ const latestByIndex = new Map();   // index -> latest result snapshot
 const shownSet = new Set();        // indexes already rendered
 const skeletonSet = new Set(); // deprecated (kept for compatibility, not used)
 let skeletonEl = null;             // single global skeleton row element
+const finishTimeByIndex = new Map(); // index -> timestamp ms selesai
+
+function fmtTime(ms){ try { const d=new Date(ms); return d.toLocaleTimeString(); } catch { return '-'; } }
 
 function isFinalStatus(s) { return s && !['WAIT','🔄','🔁'].includes(s); }
 function isFailureStatus(s) { return s === '❌' || s === 'Dead'; }
@@ -119,12 +122,12 @@ function processResults(list) {
 
     if (twoPhase) {
       if (r.Status === '✅' && r.XRAY) {
-        if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); }
+        if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); if(!finishTimeByIndex.has(r.index)) finishTimeByIndex.set(r.index, Date.now()); }
         upsertRow(r);
         continue;
       }
       if (isFailureStatus(r.Status)) {
-        if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); }
+        if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); if(!finishTimeByIndex.has(r.index)) finishTimeByIndex.set(r.index, Date.now()); }
         upsertRow(r);
         continue;
       }
@@ -132,7 +135,7 @@ function processResults(list) {
       continue;
     } else {
       if (isFinalStatus(r.Status)) {
-        if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); }
+        if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); if(!finishTimeByIndex.has(r.index)) finishTimeByIndex.set(r.index, Date.now()); }
         upsertRow(r);
         continue;
       } else {
@@ -228,20 +231,14 @@ function renderFloatRow(r){
   const tag = cleanTag(r.OriginalTag || r.tag || '');
   const isp = (r.Provider || '-').toString().replace(/\(.*?\)/g,'').replace(/,+/g, ',').trim();
   const ip = r['Tested IP'] || r.server || '-';
-  const ping = (r.ICMP==='✔') ? 'OK' : (r.ICMP||'-');
   const transport = (r.TestType||'').split(' ').slice(-1)[0] || '-';
   const phase = r.XRAY ? 'P2' : (isFinalStatus(r.Status)?'P1':'–');
+  const finished = fmtTime(finishTimeByIndex.get(r.index));
   return `
     <td title="${escapeHtml(tag)}">${escapeHtml(truncate(tag,24))}</td>
-    <td>${escapeHtml((r.VpnType||r.type||'').toLowerCase())}</td>
-    <td title="${escapeHtml(isp)}">${escapeHtml(truncate(isp,22))}</td>
-    <td>${escapeHtml(r.Country||'❓')}</td>
-    <td title="${escapeHtml(ip)}"><code>${escapeHtml(truncate(ip,18))}</code></td>
-    <td>${fmtLatency(r.Latency)}</td>
-    <td title="${escapeHtml(r.ICMP||'')}">${escapeHtml(ping)}</td>
-    <td class="${statusClass(status)}" title="${escapeHtml(r.Reason||'')}">${status}</td>
     <td>${escapeHtml(transport)}</td>
-    <td>${phase}</td>`;
+    <td>${phase}</td>
+    <td>${escapeHtml(finished)}</td>`;
 }
 
 function rerenderTableInCompletionOrder(totalHint) {
@@ -322,6 +319,27 @@ function toggleFloatingPanel(show){
 function bindFloatingControls(){
   const btn = $('#btn-toggle-float'); if (btn) btn.addEventListener('click', ()=> toggleFloatingPanel());
   const close = $('#btn-close-float'); if (close) close.addEventListener('click', ()=> toggleFloatingPanel(false));
+  initFloatingDrag();
+}
+
+function initFloatingDrag(){
+  const panel = $('#floating-panel'); if (!panel) return;
+  const header = panel.querySelector('.card-header'); if (!header) return;
+  let dragging=false, offX=0, offY=0;
+  function onMove(e){ if(!dragging) return; panel.style.left = (e.clientX - offX) + 'px'; panel.style.top = (e.clientY - offY) + 'px'; }
+  function onUp(){ dragging=false; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); }
+  header.addEventListener('mousedown', (e)=>{
+    dragging=true;
+    const rect = panel.getBoundingClientRect();
+    offX = e.clientX - rect.left; offY = e.clientY - rect.top;
+    // switch to explicit top/left positioning
+    panel.style.right = 'auto'; panel.style.bottom = 'auto';
+    if (!panel.style.left) panel.style.left = rect.left + 'px';
+    if (!panel.style.top) panel.style.top = rect.top + 'px';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  });
 }
 
 // Socket
