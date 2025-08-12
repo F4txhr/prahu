@@ -108,6 +108,10 @@ def fetch_vpn_links_from_url(url, url_type='auto'):
 def index():
     return render_template('index.html')
 
+@app.route('/favicon.ico')
+def _favicon_no_content():
+    return ('', 204)
+
 @app.route('/api/setup-github', methods=['POST'])
 def setup_github():  # legacy endpoint, superseded by save_github_config
     data = request.json
@@ -363,12 +367,27 @@ def handle_start_testing(payload=None):
     if mode:
         print(f"🧭 Testing mode: {mode}{' (Top‑N='+str(top_n)+')' if (mode=='hybrid' and top_n) else ''}")
     print(f"🔍 DEBUG: start_testing received, accounts count: {len(session_data['all_accounts'])}")
-    
+
+    # PRE-FLIGHT: ensure required tools (XRAY) available
+    try:
+        from real_geolocation_tester import ensure_xray_available
+        xray_path = ensure_xray_available()
+        if xray_path:
+            # give a short delay to ensure binary is ready on slow FS
+            import time
+            time.sleep(1.0)
+            os.environ['XRAY_PATH'] = xray_path
+            print(f"✅ Preflight: XRAY ready at {xray_path}")
+        else:
+            print("⚠️ Preflight: XRAY not available; egress ISP may be unavailable")
+    except Exception as e:
+        print(f"⚠️ Preflight error: {e}")
+
     if not session_data['all_accounts']:
         print("❌ DEBUG: No accounts found in session_data")
         emit('testing_error', {'message': 'No accounts to test'})
         return
-    
+
     print("✅ DEBUG: Starting testing process in backend...")
     
     def run_tests():
@@ -462,9 +481,9 @@ def handle_start_testing(payload=None):
                 selected_mode = (mode or 'accurate').lower()
                 print(f"🧭 Orchestration mode: {selected_mode}")
                 t0 = datetime.now()
-                if selected_mode == 'fast':
-                    # Non-XRAY only
-                    await run_phase(False)
+                if selected_mode == 'xray-only' or selected_mode == 'default' or not selected_mode:
+                    # XRAY only as primary; Non‑XRAY handled as fallback inside test_account
+                    await run_phase(True)
                     t_mid = datetime.now()
                 elif selected_mode == 'xray-only':
                     # XRAY for all

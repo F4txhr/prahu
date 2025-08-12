@@ -15,6 +15,7 @@ import urllib.request
 import platform
 import time
 import threading
+import socket
 
 def ensure_xray_available(dest_path: str | None = None) -> str | None:
     """Try to download Xray for current platform and chmod +x. Returns path if available."""
@@ -228,51 +229,44 @@ class RealGeolocationTester:
         USER'S IMPROVED METHOD: Create Xray config dengan proper VLESS/VMess handling
         Based on working standalone script
         """
-        protocol = account.get('type', '')
-        
-        # Mapping protocol names untuk Xray
-        protocol_name = 'shadowsocks' if protocol == 'ss' else protocol
-        outbound = {"protocol": protocol_name}
+        protocol_name = account.get('type', '').lower()
+        outbound = {
+            "protocol": protocol_name,
+            "settings": {},
+            "streamSettings": {
+                "network": "tcp",
+                "security": "none"
+            }
+        }
         
         # --- STREAM SETTINGS (Handle transport & TLS first) ---
         transport = account.get('transport', {})
         tls_config = account.get('tls', {})
         
-        if transport.get('type') != 'tcp' or tls_config.get('enabled'):
-            stream_settings = {}
-            
-            # Network type
-            network_type = transport.get('type', 'tcp')
-            if network_type != 'tcp':
-                stream_settings["network"] = network_type
-            
-            # TLS settings
-            if tls_config.get('enabled') or account.get('security') == 'tls':
-                stream_settings['security'] = 'tls'
-                sni = tls_config.get('sni') or tls_config.get('server_name', account.get('server', ''))
-                stream_settings['tlsSettings'] = {"serverName": sni}
-                
-                # ALPN support (user's improvement)
-                alpn = account.get('alpn')
-                if alpn:
-                    stream_settings['tlsSettings']["alpn"] = [alpn]
-            
-            # WebSocket settings
-            if network_type == 'ws':
-                ws_settings = {
-                    "path": transport.get('path', '/'),
-                    "headers": transport.get('headers', {})
-                }
-                stream_settings['wsSettings'] = ws_settings
-            
-            # gRPC settings
-            elif network_type == 'grpc':
-                stream_settings['grpcSettings'] = {
-                    "serviceName": transport.get('serviceName', account.get('serviceName', ''))
-                }
-            
-            if stream_settings:
-                outbound['streamSettings'] = stream_settings
+        # Determine network type
+        network_type = transport.get('type') or account.get('network') or 'tcp'
+        outbound['streamSettings']['network'] = network_type
+        
+        # TLS settings
+        tls_enabled = bool(tls_config.get('enabled') or account.get('security') == 'tls')
+        if tls_enabled:
+            outbound['streamSettings']['security'] = 'tls'
+            # Fallback order: tls.sni -> tls.server_name -> transport.headers.Host -> server
+            headers = transport.get('headers', {}) if isinstance(transport, dict) else {}
+            host_hdr = headers.get('Host') if isinstance(headers, dict) else None
+            sni = tls_config.get('sni') or tls_config.get('server_name') or host_hdr or account.get('server', '')
+            outbound['streamSettings']['tlsSettings'] = {"serverName": sni}
+        
+        # WS settings
+        if network_type == 'ws':
+            ws_settings = {
+                "path": transport.get('path', '/') if isinstance(transport, dict) else '/',
+                "headers": transport.get('headers', {}) if isinstance(transport, dict) else {}
+            }
+            # Ensure Host header present for WS if possible
+            if tls_enabled and not ws_settings["headers"].get('Host'):
+                ws_settings["headers"]['Host'] = tls_config.get('sni') or tls_config.get('server_name') or account.get('server', '')
+            outbound['streamSettings']['wsSettings'] = ws_settings
         
         # --- PROTOCOL SETTINGS (User's improved approach) ---
         if protocol_name == 'vless':
@@ -280,11 +274,9 @@ class RealGeolocationTester:
                 "uuid": account.get('uuid', account.get('user_id', '')),
                 "encryption": account.get('encryption', 'none') or 'none'
             }
-            # Flow support untuk VLESS (user's improvement)
             flow = account.get('flow')
             if flow:
                 user_config["flow"] = flow
-                
             outbound['settings'] = {
                 "vnext": [{
                     "address": account.get('server', ''),
@@ -292,20 +284,16 @@ class RealGeolocationTester:
                     "users": [user_config]
                 }]
             }
-            
         elif protocol_name == 'vmess':
             user_config = {
                 "id": account.get('uuid', account.get('user_id', ''))
             }
-            # VMess specific settings (user's improvement)
             alter_id = account.get('alter_id', account.get('alterId'))
             if alter_id is not None:
                 user_config["alterId"] = int(alter_id)
-            
             encryption = account.get('encryption')
             if encryption:
                 user_config["encryption"] = encryption
-                
             outbound['settings'] = {
                 "vnext": [{
                     "address": account.get('server', ''),
@@ -313,35 +301,31 @@ class RealGeolocationTester:
                     "users": [user_config]
                 }]
             }
-            
         elif protocol_name == 'trojan':
             server_config = {
                 "address": account.get('server', ''),
                 "port": int(account.get('server_port', 443)),
-                "password": account.get('password', account.get('user_id', ''))
+                "password": account.get('password', account.get('uuid', ''))
             }
-            # Flow support untuk Trojan (user's improvement)
             flow = account.get('flow')
             if flow:
                 server_config["flow"] = flow
-                
             outbound['settings'] = {
                 "servers": [server_config]
             }
-            
         elif protocol_name == 'shadowsocks':
             server_config = {
                 "address": account.get('server', ''),
                 "port": int(account.get('server_port', 443)),
-                "method": account.get('method', 'aes-256-gcm'),
+                "method": account.get('method', ''),
                 "password": account.get('password', '')
             }
             outbound['settings'] = {
                 "servers": [server_config]
             }
         else:
-            print(f"❌ Unsupported protocol: {protocol}")
-            return None
+            # Unknown protocol; let Xray handle basic fields
+            outbound['settings'] = {}
         
         return {
             "log": {"loglevel": "warning"},
@@ -676,17 +660,19 @@ class RealGeolocationTester:
             print(f"   Original Host: {original_host}")
             print(f"   Cleaned target: {cleaned_target}")
             
-            # Update TLS SNI untuk testing dengan cleaned domain
-            if 'tls' in modified_account:
-                if 'sni' in modified_account['tls']:
-                    modified_account['tls']['sni'] = cleaned_target
-                if 'server_name' in modified_account['tls']:
-                    modified_account['tls']['server_name'] = cleaned_target
+            # Update TLS SNI untuk testing dengan cleaned domain (set selalu)
+            if 'tls' not in modified_account or not isinstance(modified_account['tls'], dict):
+                modified_account['tls'] = {}
+            modified_account['tls']['enabled'] = True
+            modified_account['tls']['sni'] = cleaned_target
+            modified_account['tls']['server_name'] = cleaned_target
             
-            # Update transport Host untuk testing dengan cleaned domain
-            if 'transport' in modified_account and 'headers' in modified_account['transport']:
-                if 'Host' in modified_account['transport']['headers']:
-                    modified_account['transport']['headers']['Host'] = cleaned_target
+            # Update transport Host untuk testing dengan cleaned domain (set selalu)
+            if 'transport' not in modified_account or not isinstance(modified_account['transport'], dict):
+                modified_account['transport'] = {}
+            if 'headers' not in modified_account['transport'] or not isinstance(modified_account['transport']['headers'], dict):
+                modified_account['transport']['headers'] = {}
+            modified_account['transport']['headers']['Host'] = cleaned_target
             
             print(f"   ✅ Modified untuk testing - SNI: {modified_account.get('tls', {}).get('sni')}, Host: {modified_account.get('transport', {}).get('headers', {}).get('Host')}")
         else:
@@ -849,109 +835,144 @@ class RealGeolocationTester:
             self.xray_path = downloaded
         print(f"✅ XRAY will be used at: {self.xray_path}")
         
-        try:
-            # limit concurrency
-            RealGeolocationTester._pool.acquire()
-            # Create Xray config
-            config = self.create_xray_config(account)
-            if not config:
-                return {'success': False, 'error': 'Config creation failed', 'method': 'proxy', 'reason': 'ConfigError'}
-            
-            # Write temp config
+        def pick_free_port() -> int:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('127.0.0.1', 0))
+                return s.getsockname()[1]
+
+        def build_and_start(acc):
+            cfg = self.create_xray_config(acc)
+            if not cfg:
+                return None, None
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                json.dump(config, f)
-                temp_config = f.name
-            
+                json.dump(cfg, f)
+                tmp = f.name
+            # log Xray output ke file untuk debugging
+            logf = tempfile.NamedTemporaryFile(mode='wb', suffix='.log', delete=False)
+            log_path = logf.name
+            logf.close()
+            print(f"📝 XRAY log: {log_path}")
+            proc = subprocess.Popen([self.xray_path, '-c', tmp], stdout=open(log_path, 'ab'), stderr=open(log_path, 'ab'))
+            return proc, tmp
+        
+        def stop_and_cleanup(proc, tmp):
             try:
-                # Start Xray process
-                xray_process = subprocess.Popen(
-                    [self.xray_path, '-c', temp_config],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                time.sleep(2)  # Wait for startup
-                
-                # Test connection
-                proxy_arg = f"http://127.0.0.1:{self.local_http_port}"
-                start_time = time.monotonic()
-                head = subprocess.run(
-                    ['curl', '-s', '-I', self.test_url, '--proxy', proxy_arg,
-                     '--connect-timeout', str(self.timeout_seconds)],
-                    capture_output=True, timeout=self.timeout_seconds + 2
-                )
-                connect_ok = head.returncode == 0
-                end_time = time.monotonic()
-                latency_ms = (end_time - start_time) * 1000
-
-                # Collect geo from multiple endpoints
-                votes = []
-                ip_seen = None
-                for name, url in self.geo_endpoints:
-                    try:
-                        res = subprocess.run(
-                            ['curl', '-s', url, '--proxy', proxy_arg],
-                            capture_output=True, text=True, timeout=10
-                        )
-                        if res.returncode != 0:
-                            continue
-                        if name == 'cf-trace':
-                            # Parse key=value lines
-                            data = {}
-                            for line in res.stdout.splitlines():
-                                if '=' in line:
-                                    k, v = line.split('=', 1)
-                                    data[k.strip()] = v.strip()
-                            ip = data.get('ip')
-                            colo = data.get('colo')
-                            if ip:
-                                votes.append({'ip': ip, 'provider': data.get('loc', ''), 'country': data.get('loc', '')})
-                                ip_seen = ip_seen or ip
-                        else:
-                            data = json.loads(res.stdout)
-                            if name == 'ip-api':
-                                votes.append({'ip': data.get('query'), 'provider': data.get('org') or data.get('isp'), 'country': data.get('countryCode')})
-                                ip_seen = ip_seen or data.get('query')
-                            elif name == 'ipinfo':
-                                votes.append({'ip': data.get('ip'), 'provider': data.get('org'), 'country': (data.get('country') or '').upper()})
-                                ip_seen = ip_seen or data.get('ip')
-                    except Exception:
-                        continue
-
-                def majority(key):
-                    from collections import Counter
-                    vals = [v.get(key) for v in votes if v.get(key)]
-                    return Counter(vals).most_common(1)[0][0] if vals else None
-
-                country = majority('country') or 'N/A'
-                provider = majority('provider') or 'N/A'
-                ip_final = majority('ip') or ip_seen or 'N/A'
-
-                if connect_ok and ip_final != 'N/A':
-                    return {
-                        'success': True,
-                        'country': country,
-                        'country_name': country,
-                        'isp': provider,
-                        'org': provider,
-                        'ip': ip_final,
-                        'method': 'VPN Proxy',
-                        'latency': latency_ms
-                    }
-                else:
-                    return {'success': False, 'error': 'ProxyConnectFail' if not connect_ok else 'GeoResolveFail', 'method': 'proxy'}
-
-            finally:
-                # Cleanup
-                if 'xray_process' in locals():
-                    xray_process.kill()
-                os.unlink(temp_config)
+                if proc: proc.kill()
+            except Exception:
+                pass
+            try:
+                if tmp and os.path.exists(tmp): os.unlink(tmp)
+            except Exception:
+                pass
+        
+        try:
+            RealGeolocationTester._pool.acquire()
+            # gunakan inbound port acak yang bebas untuk menghindari bentrok
+            self.local_http_port = pick_free_port()
+            proxy_arg = f"http://127.0.0.1:{self.local_http_port}"
+            timeout = self.timeout_seconds
+            
+            # Attempt 1: use account as-is (with our SNI/Host fallbacks in builder)
+            xray_process, temp_config = build_and_start(account)
+            if not xray_process:
+                return {'success': False, 'error': 'Config creation failed', 'method': 'proxy', 'reason': 'ConfigError'}
+            time.sleep(4)
+            head = subprocess.run(['curl', '-s', 'https://ipinfo.io/ip', '--proxy', proxy_arg, '--connect-timeout', str(timeout)], capture_output=True, text=True, timeout=timeout+2)
+            connect_ok = (head.returncode == 0 and head.stdout.strip() != '')
+            
+            # Attempt 2: retry with adjusted SNI/Host if head failed
+            if not connect_ok:
+                stop_and_cleanup(xray_process, temp_config)
+                # Build alt account: prefer Host header for SNI; if missing, use server
+                alt = json.loads(json.dumps(account))
+                tls = alt.get('tls', {}) if isinstance(alt.get('tls'), dict) else {}
+                transport = alt.get('transport', {}) if isinstance(alt.get('transport'), dict) else {}
+                headers = transport.get('headers', {}) if isinstance(transport.get('headers'), dict) else {}
+                host_hdr = headers.get('Host') or alt.get('server', '')
+                if isinstance(tls, dict):
+                    tls['sni'] = tls.get('sni') or tls.get('server_name') or host_hdr
+                    tls['server_name'] = tls.get('server_name') or tls.get('sni')
+                    alt['tls'] = tls
+                if isinstance(transport, dict):
+                    if 'headers' in transport and isinstance(transport['headers'], dict):
+                        transport['headers']['Host'] = transport['headers'].get('Host') or host_hdr
+                    alt['transport'] = transport
+                xray_process, temp_config = build_and_start(alt)
+                if not xray_process:
+                    return {'success': False, 'error': 'Config creation failed (alt)', 'method': 'proxy', 'reason': 'ConfigError'}
+                time.sleep(5)
+                head = subprocess.run(['curl', '-s', 'https://ipinfo.io/ip', '--proxy', proxy_arg, '--connect-timeout', str(timeout)], capture_output=True, text=True, timeout=timeout+2)
+                connect_ok = (head.returncode == 0 and head.stdout.strip() != '')
+            
+            # If still not ok, fail fast
+            if not connect_ok:
+                stop_and_cleanup(xray_process, temp_config)
+                return {'success': False, 'error': 'ProxyConnectFail', 'method': 'proxy'}
+            
+            # Collect geo from multiple endpoints via proxy
+            start_time = time.monotonic()
+            # first ping ipinfo to set baseline
+            _ = subprocess.run(['curl', '-s', 'https://ipinfo.io/ip', '--proxy', proxy_arg, '--connect-timeout', str(timeout)], capture_output=True, text=True, timeout=timeout+2)
+            end_time = time.monotonic()
+            latency_ms = (end_time - start_time) * 1000
+            votes = []
+            ip_seen = None
+            for name, url in self.geo_endpoints:
                 try:
-                    RealGeolocationTester._pool.release()
+                    res = subprocess.run(['curl', '-s', url, '--proxy', proxy_arg], capture_output=True, text=True, timeout=10)
+                    if res.returncode != 0:
+                        continue
+                    if name == 'cf-trace':
+                        data = {}
+                        for line in res.stdout.splitlines():
+                            if '=' in line:
+                                k, v = line.split('=', 1)
+                                data[k.strip()] = v.strip()
+                        ip = data.get('ip')
+                        if ip:
+                            votes.append({'ip': ip, 'provider': data.get('loc', ''), 'country': data.get('loc', '')})
+                            ip_seen = ip_seen or ip
+                    else:
+                        data = json.loads(res.stdout)
+                        if name == 'ip-api':
+                            votes.append({'ip': data.get('query'), 'provider': data.get('org') or data.get('isp'), 'country': data.get('countryCode')})
+                            ip_seen = ip_seen or data.get('query')
+                        elif name == 'ipinfo':
+                            votes.append({'ip': data.get('ip'), 'provider': data.get('org'), 'country': (data.get('country') or '').upper()})
+                            ip_seen = ip_seen or data.get('ip')
                 except Exception:
-                    pass
-         
+                    continue
+            
+            from collections import Counter
+            def majority(key):
+                vals = [v.get(key) for v in votes if v.get(key)]
+                return Counter(vals).most_common(1)[0][0] if vals else None
+            country = majority('country') or 'N/A'
+            provider = majority('provider') or 'N/A'
+            ip_final = majority('ip') or ip_seen or 'N/A'
+            
+            stop_and_cleanup(xray_process, temp_config)
+            
+            if ip_final != 'N/A':
+                return {
+                    'success': True,
+                    'country': country,
+                    'country_name': country,
+                    'isp': provider,
+                    'org': provider,
+                    'ip': ip_final,
+                    'method': 'VPN Proxy',
+                    'latency': latency_ms
+                }
+            else:
+                return {'success': False, 'error': 'GeoResolveFail', 'method': 'proxy'}
         except Exception as e:
             return {'success': False, 'error': str(e), 'method': 'proxy'}
+        finally:
+            try:
+                RealGeolocationTester._pool.release()
+            except Exception:
+                pass
          
         return {'success': False, 'error': 'Connection failed', 'method': 'proxy'}
 

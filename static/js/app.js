@@ -1,1885 +1,669 @@
-// Global variables
-let socket;
-// USER REQUEST: currentSection removed - single page layout only
-let isGitHubConfigured = false;
-let testResults = [];
-let totalAccounts = 0;
+// State
+let socket = null;
+let currentMode = 'default';
+let totals = { total: 0, completed: 0 };
+let results = [];
+let plannedTotal = 0; // total akun yang akan dites (dari add-links-and-test)
+let floatSort = { field: 'finished', dir: 'asc' }; // sort field: 'tag'|'phase'|'jitter'|'finished'
+let floatFilter = { live: false, dead: false, p2: false };
 
-// Initialize app when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-    // Theme init
+// Utils
+function $(q) { return document.querySelector(q); }
+function $all(q) { return Array.from(document.querySelectorAll(q)); }
+function fmtLatency(v) { if (v == null || v === -1) return '–'; return `${v} ms`; }
+function getTotalValue(data) {
+  const v = (data && (data.total ?? data.total_accounts ?? (Array.isArray(data.results) ? data.results.length : 0))) || 0;
+  return Number.isFinite(v) ? v : 0;
+}
+
+// Ripple via delegation
+function bindRipple() {
+  document.addEventListener('pointerdown', (e) => {
+    const btn = e.target.closest('.btn');
+    if (!btn) return;
+    const rect = btn.getBoundingClientRect();
+    btn.style.setProperty('--x', `${e.clientX - rect.left}px`);
+    btn.style.setProperty('--y', `${e.clientY - rect.top}px`);
+  }, { passive: true });
+}
+
+// Toast
+function toast(message, type='info') {
+  const c = $('#toast-container'); if (!c) return;
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = message;
+  c.appendChild(el);
+  setTimeout(() => { el.remove(); }, 3000);
+}
+
+// Info popover with toggle
+function bindInfoTips() {
+  let currentTip = null;
+  function hideTip() { if (currentTip) { currentTip.remove(); currentTip = null; } }
+  document.addEventListener('click', (e) => {
+    const btn = e.target.closest('.info-btn');
+    if (!btn) { hideTip(); return; }
+    // Toggle
+    if (currentTip && currentTip.__owner === btn) { hideTip(); return; }
+    hideTip();
+    const tip = document.createElement('div');
+    tip.className = 'toast';
+    tip.style.position = 'absolute';
+    tip.style.whiteSpace = 'nowrap';
+    tip.textContent = btn.getAttribute('data-info') || '';
+    const r = btn.getBoundingClientRect();
+    tip.style.left = `${Math.max(12, r.left - 8)}px`;
+    tip.style.top = `${r.bottom + 6 + window.scrollY}px`;
+    tip.style.zIndex = 50;
+    tip.__owner = btn;
+    document.body.appendChild(tip);
+    currentTip = tip;
+  });
+  window.addEventListener('scroll', () => { if (currentTip) { currentTip.remove(); currentTip = null; } });
+}
+
+// Status UI
+function setStatus(text, type='info') {
+  const dot = $('#status-dot'); const t = $('#status-text');
+  t.textContent = text;
+  dot.classList.remove('success','error','warning');
+  if (type==='success') dot.classList.add('success');
+  if (type==='error') dot.classList.add('error');
+  if (type==='warning') dot.classList.add('warning');
+}
+
+function setModePill(mode) { $('#mode-pill').textContent = mode ? mode : 'Idle'; }
+function setProgress(completed, total) {
+  totals = { completed, total };
+  const pct = total > 0 ? Math.round((completed/total)*100) : 0;
+  $('#completed-count').textContent = completed;
+  $('#total-count').textContent = total;
+  $('#progress-bar').style.width = `${pct}%`;
+}
+
+// Completion-ordered view: show only completed items in order of completion
+const displayOrder = [];           // array of index in completion order
+const latestByIndex = new Map();   // index -> latest result snapshot
+const shownSet = new Set();        // indexes already rendered
+const skeletonSet = new Set(); // deprecated (kept for compatibility, not used)
+let skeletonEl = null;             // single global skeleton row element
+const finishTimeByIndex = new Map(); // index -> timestamp ms selesai
+
+function fmtTime(ms){ try { const d=new Date(ms); return d.toLocaleTimeString(); } catch { return '-'; } }
+
+function isFinalStatus(s) { return s && !['WAIT','🔄','🔁'].includes(s); }
+function isFailureStatus(s) { return s === '❌' || s === 'Dead'; }
+function shouldShowResult(r) {
+  // Only show completed items
+  if (!isFinalStatus(r.Status)) return false;
+  // For two-phase modes, show second phase result for successes; failures can show as is
+  const twoPhase = (currentMode === 'hybrid' || currentMode === 'accurate');
+  if (twoPhase) {
+    if (r.Status === '✅') return !!r.XRAY; // show only XRAY successes
+    return true; // failures (❌/Dead) show
+  }
+  return true; // fast/xray-only
+}
+
+function resetTableState() {
+  displayOrder.length = 0;
+  latestByIndex.clear();
+  shownSet.clear();
+  rowMap.clear();
+  const tbody = $('#results-body'); if (tbody) tbody.innerHTML = '';
+  if (skeletonEl) { skeletonEl.remove(); skeletonEl = null; }
+}
+
+function processResults(list) {
+  if (!Array.isArray(list)) return;
+  for (const r of list) {
+    if (!r || typeof r !== 'object' || !Number.isFinite(r.index)) continue;
+    latestByIndex.set(r.index, r);
+    const twoPhase = (currentMode === 'hybrid' || currentMode === 'accurate');
+
+    if (twoPhase) {
+      if (r.Status === '✅' && r.XRAY) {
+        if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); if(!finishTimeByIndex.has(r.index)) finishTimeByIndex.set(r.index, Date.now()); }
+        upsertRow(r);
+        continue;
+      }
+      if (isFailureStatus(r.Status)) {
+        if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); if(!finishTimeByIndex.has(r.index)) finishTimeByIndex.set(r.index, Date.now()); }
+        upsertRow(r);
+        continue;
+      }
+      // phase1 success or non-final: do not render final row here
+      continue;
+    } else {
+      if (isFinalStatus(r.Status)) {
+        if (!shownSet.has(r.index)) { shownSet.add(r.index); displayOrder.push(r.index); if(!finishTimeByIndex.has(r.index)) finishTimeByIndex.set(r.index, Date.now()); }
+        upsertRow(r);
+        continue;
+      } else {
+        // non-final in single phase -> handled by global skeleton
+        continue;
+      }
+    }
+  }
+}
+
+function upsertRow(r) {
+  const tbody = $('#results-body'); if (!tbody) return;
+  const status = normalizeStatus(r.Status);
+  let tr = rowMap.get(r.index);
+  if (!tr) {
+    tr = document.createElement('tr');
+    tr.id = `row-${r.index}`;
+    rowMap.set(r.index, tr);
+  }
+  tr.innerHTML = `
+    <td>${escapeHtml(r.OriginalTag || r.tag || '')}</td>
+    <td>${escapeHtml(r.VpnType || r.type || '')}</td>
+    <td>${escapeHtml(r['Tested IP'] || r.server || '-')}</td>
+    <td>${fmtLatency(r.Latency)}</td>
+    <td>${escapeHtml(r.Country || '❓')}</td>
+    <td class="${statusClass(status)}">${status}</td>
+  `;
+}
+
+function ensureGlobalSkeleton(pending) {
+  const tbody = $('#results-body'); if (!tbody) return;
+  if (pending) {
+    if (!skeletonEl) {
+      skeletonEl = document.createElement('tr');
+      skeletonEl.id = 'skel-global';
+      skeletonEl.className = 'skel-row';
+      skeletonEl.innerHTML = `
+        <td><span class="skeleton-line lg"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line md"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line md"></span></td>
+      `;
+    }
+    // Position skeleton after last completed row
+    const frag = document.createDocumentFragment();
+    for (const idx of displayOrder) {
+      const tr = rowMap.get(idx);
+      if (tr) frag.appendChild(tr);
+    }
+    frag.appendChild(skeletonEl);
+    tbody.innerHTML = '';
+    tbody.appendChild(frag);
+  } else {
+    if (skeletonEl) { skeletonEl.remove(); skeletonEl = null; }
+    // Re-render finals only
+    const frag = document.createDocumentFragment();
+    for (const idx of displayOrder) {
+      const tr = rowMap.get(idx);
+      if (tr) frag.appendChild(tr);
+    }
+    tbody.innerHTML = '';
+    tbody.appendChild(frag);
+  }
+}
+
+function cleanTag(tag) {
+  let s = (tag || '').toString();
+  // Hapus emoji bendera (regional indicator pairs)
+  try { s = s.replace(/[\u{1F1E6}-\u{1F1FF}]{2}/gu, ''); } catch {}
+  // Hapus kode negara di dalam kurung, contoh: (FR), (SG)
+  s = s.replace(/\(\s*[A-Z]{2,3}\s*\)/g, '');
+  // Hapus suffix penomoran seperti -1, - 2 di akhir
+  s = s.replace(/\s*-\s*\d+\s*$/g, '');
+  // Bersihkan separator di tepi (tanpa menghapus huruf di dalam kata)
+  s = s.replace(/^[\s\-–/+,.;:_]+/, '').replace(/[\s\-–/+,.;:_]+$/, '');
+  // Normalisasi spasi
+  s = s.replace(/\s{2,}/g, ' ');
+  return s.trim();
+}
+function truncate(str, max){ const s=(str||'').toString(); return s.length>max ? s.slice(0,max-1)+'…' : s; }
+
+function renderMainRow(r){
+  const status = normalizeStatus(r.Status);
+  const tag = cleanTag(r.OriginalTag || r.tag || '');
+  const isp = (r.Provider || '-').toString().replace(/\(.*?\)/g,'').replace(/,+/g, ',').trim();
+  const ip = r['Tested IP'] || r.server || '-';
+  const country = r.Country || '❓';
+  return `
+    <td title="${escapeHtml(tag)}">${escapeHtml(truncate(tag,24))}</td>
+    <td>${escapeHtml((r.VpnType||r.type||'').toLowerCase())}</td>
+    <td title="${escapeHtml(isp)}">${escapeHtml(truncate(isp,22))}</td>
+    <td>${escapeHtml(country)}</td>
+    <td title="${escapeHtml(ip)}"><code>${escapeHtml(truncate(ip,18))}</code></td>
+    <td>${fmtLatency(r.Latency)}</td>
+    <td class="${statusClass(status)}" title="${escapeHtml(r.Reason||'')}">${status==='✅'?'Live':'Dead'}</td>`;
+}
+
+function renderFloatRow(r){
+  const status = normalizeStatus(r.Status);
+  const tag = cleanTag(r.OriginalTag || r.tag || '');
+  const transport = (r.TestType||'').split(' ').slice(-1)[0] || '-';
+  const phase = r.XRAY ? 'P2' : (isFinalStatus(r.Status)?'P1':'–');
+  const finished = fmtTime(finishTimeByIndex.get(r.index));
+  const jitter = Number.isFinite(+r.Jitter) && +r.Jitter>=0 ? `${r.Jitter} ms` : '–';
+  const titleStatus = r.Reason ? `Reason: ${r.Reason}` : '';
+  const titleICMP = r.ICMP ? `ICMP: ${r.ICMP}` : '';
+  return `
+    <td title="${escapeHtml(tag)}">${escapeHtml(truncate(tag,24))}</td>
+    <td>${escapeHtml(transport)}</td>
+    <td title="${escapeHtml(titleStatus)}">${phase}</td>
+    <td title="${escapeHtml(titleICMP)}">${jitter}</td>
+    <td>${escapeHtml(finished)}</td>
+    <td>
+      <button class="btn btn-soft text-xs px-2 py-1" data-copy="tag" data-idx="${r.index}">Tag</button>
+      <button class="btn btn-soft text-xs px-2 py-1" data-copy="ip" data-idx="${r.index}">IP</button>
+      <button class="btn btn-soft text-xs px-2 py-1" data-copy="json" data-idx="${r.index}">JSON</button>
+    </td>`;
+}
+
+function bindCopyHandlers(){
+  const tbody = $('#float-body'); if (!tbody) return;
+  tbody.addEventListener('click', async (e)=>{
+    const btn = e.target.closest('button[data-copy]'); if (!btn) return;
+    const type = btn.getAttribute('data-copy');
+    const idx = parseInt(btn.getAttribute('data-idx'),10);
+    const r = latestByIndex.get(idx); if (!r) return;
     try {
-        const saved = localStorage.getItem('theme');
-        if (saved === 'light') document.body.setAttribute('data-theme', 'light');
-    } catch (e) {}
-    initializeApp();
-});
-
-// Initialize the application
-function initializeApp() {
-    // Show loading screen briefly for better UX
-    setTimeout(() => {
-        hideLoadingScreen();
-    }, 1000);
-    
-    // Initialize Socket.IO
-    initializeSocket();
-    
-    // Setup navigation
-    // USER REQUEST: Navigation removed - single page layout only
-    
-    // Setup event listeners
-    setupEventListeners();
-    
-    // Setup form handlers
-    setupFormHandlers();
-    
-    // Load saved GitHub configuration
-    loadSavedGitHubConfig();
-    
-    // Auto-load template configuration
-    autoLoadConfiguration();
-    
-    // USER REQUEST: Check for ongoing testing on page refresh
-    checkTestingStatusOnLoad();
-    
-    // Update status
-    updateStatus('Ready', 'success');
+      if (type==='tag') { await navigator.clipboard.writeText(cleanTag(r.OriginalTag || r.tag || '')); toast('Tag copied','success'); }
+      else if (type==='ip') { await navigator.clipboard.writeText(r['Tested IP'] || r.server || ''); toast('IP copied','success'); }
+      else if (type==='json') { await navigator.clipboard.writeText(JSON.stringify(r, null, 2)); toast('JSON copied','success'); }
+    } catch { toast('Copy failed','error'); }
+  });
 }
 
-// USER REQUEST: Check testing status on page load for refresh persistence
-async function checkTestingStatusOnLoad() {
+function rerenderTableInCompletionOrder(totalHint) {
+  const tbody = $('#results-body'); if (!tbody) return;
+  const frag = document.createDocumentFragment();
+  for (const idx of displayOrder) {
+    const r = latestByIndex.get(idx); if (!r) continue;
+    let tr = rowMap.get(idx);
+    if (!tr) { tr = document.createElement('tr'); tr.id = `row-${idx}`; rowMap.set(idx, tr); }
+    tr.innerHTML = renderMainRow(r);
+    frag.appendChild(tr);
+  }
+  // Append or remove skeleton
+  const pending = Number.isFinite(totalHint) ? (displayOrder.length < totalHint) : false;
+  if (pending) {
+    if (!skeletonEl) {
+      skeletonEl = document.createElement('tr');
+      skeletonEl.id = 'skel-global';
+      skeletonEl.className = 'skel-row';
+      skeletonEl.innerHTML = `
+        <td><span class="skeleton-line lg"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line md"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line md"></span></td>`;
+    }
+    frag.appendChild(skeletonEl);
+  } else if (skeletonEl) { skeletonEl.remove(); skeletonEl = null; }
+
+  tbody.innerHTML = '';
+  tbody.appendChild(frag);
+
+  // Rerender floating panel if visible
+  const panel = $('#floating-panel');
+  if (panel && !panel.classList.contains('hidden')) rerenderFloatingTable();
+}
+
+function rerenderFloatingTable() {
+  const tbody = $('#float-body'); if (!tbody) return;
+  const frag = document.createDocumentFragment();
+  let list = displayOrder.map(idx => latestByIndex.get(idx)).filter(Boolean);
+  // Filter
+  if (floatFilter.live || floatFilter.dead || floatFilter.p2) {
+    list = list.filter(r => {
+      const s = normalizeStatus(r.Status);
+      const isLive = (s==='✅');
+      const isDead = (s==='❌' || s==='Dead');
+      const isP2 = !!r.XRAY;
+      if (floatFilter.live && !isLive) return false;
+      if (floatFilter.dead && !isDead) return false;
+      if (floatFilter.p2 && !isP2) return false;
+      return true;
+    });
+  }
+  // Sort
+  const getVal = (r) => {
+    switch(floatSort.field){
+      case 'tag': return cleanTag(r.OriginalTag||r.tag||'').toLowerCase();
+      case 'phase': return r.XRAY ? 2 : 1; // P2 > P1
+      case 'jitter': return Number.isFinite(+r.Jitter)&&+r.Jitter>=0 ? +r.Jitter : 1e9;
+      case 'finished': return finishTimeByIndex.get(r.index) || 0;
+      default: return finishTimeByIndex.get(r.index) || 0;
+    }
+  };
+  list.sort((a,b)=>{
+    const va=getVal(a), vb=getVal(b);
+    const cmp = (va<vb)?-1:(va>vb)?1:0;
+    return floatSort.dir==='asc'?cmp:-cmp;
+  });
+
+  // Append rows in order (update kebawah)
+  for (const r of list) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = renderFloatRow(r);
+    frag.appendChild(tr);
+  }
+  // Floating skeleton if pending
+  const pending = displayOrder.length < plannedTotal;
+  if (pending) {
+    const sk = document.createElement('tr');
+    sk.className = 'skel-row';
+    sk.innerHTML = `
+      <td><span class="skeleton-line lg"></span></td>
+      <td><span class="skeleton-line sm"></span></td>
+      <td><span class="skeleton-line md"></span></td>
+      <td><span class="skeleton-line sm"></span></td>
+      <td><span class="skeleton-line sm"></span></td>
+      <td><span class="skeleton-line md"></span></td>`;
+    frag.appendChild(sk);
+  }
+  tbody.innerHTML = '';
+  tbody.appendChild(frag);
+}
+
+function toggleFloatingPanel(show){
+  const panel = $('#floating-panel'); if (!panel) return;
+  if (typeof show === 'boolean') panel.classList.toggle('hidden', !show);
+  else panel.classList.toggle('hidden');
+  if (!panel.classList.contains('hidden')) rerenderFloatingTable();
+}
+
+// Bind toggle buttons
+function bindFloatingControls(){
+  const btn = $('#btn-toggle-float'); if (btn) btn.addEventListener('click', ()=> toggleFloatingPanel());
+  const close = $('#btn-close-float'); if (close) close.addEventListener('click', ()=> toggleFloatingPanel(false));
+  initFloatingDrag();
+  bindCopyHandlers();
+  // Filters
+  const fAll=$('#flt-all'), fLive=$('#flt-live'), fDead=$('#flt-dead'), fP2=$('#flt-p2');
+  if (fAll) fAll.addEventListener('click', ()=>{ floatFilter={live:false,dead:false,p2:false}; [fAll,fLive,fDead,fP2].forEach(b=>b&&b.classList.remove('btn-primary')); rerenderFloatingTable(); });
+  if (fLive) fLive.addEventListener('click', ()=>{ floatFilter.live=!floatFilter.live; fLive.classList.toggle('btn-primary', floatFilter.live); rerenderFloatingTable(); });
+  if (fDead) fDead.addEventListener('click', ()=>{ floatFilter.dead=!floatFilter.dead; fDead.classList.toggle('btn-primary', floatFilter.dead); rerenderFloatingTable(); });
+  if (fP2) fP2.addEventListener('click', ()=>{ floatFilter.p2=!floatFilter.p2; fP2.classList.toggle('btn-primary', floatFilter.p2); rerenderFloatingTable(); });
+  // Sort header
+  const hTag=$('#sort-tag'), hPhase=$('#sort-phase'), hJit=$('#sort-jitter'), hFin=$('#sort-finished');
+  function toggleSort(field){
+    if (floatSort.field===field) floatSort.dir = (floatSort.dir==='asc'?'desc':'asc'); else { floatSort.field=field; floatSort.dir='asc'; }
+    rerenderFloatingTable();
+  }
+  if (hTag) hTag.addEventListener('click', ()=> toggleSort('tag'));
+  if (hPhase) hPhase.addEventListener('click', ()=> toggleSort('phase'));
+  if (hJit) hJit.addEventListener('click', ()=> toggleSort('jitter'));
+  if (hFin) hFin.addEventListener('click', ()=> toggleSort('finished'));
+}
+
+function initFloatingDrag(){
+  const panel = $('#floating-panel'); if (!panel) return;
+  const header = panel.querySelector('.card-header'); if (!header) return;
+  let dragging=false, offX=0, offY=0;
+  function onMove(e){ if(!dragging) return; panel.style.left = (e.clientX - offX) + 'px'; panel.style.top = (e.clientY - offY) + 'px'; }
+  function onUp(){ dragging=false; document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); }
+  header.addEventListener('mousedown', (e)=>{
+    dragging=true;
+    const rect = panel.getBoundingClientRect();
+    offX = e.clientX - rect.left; offY = e.clientY - rect.top;
+    // switch to explicit top/left positioning
+    panel.style.right = 'auto'; panel.style.bottom = 'auto';
+    if (!panel.style.left) panel.style.left = rect.left + 'px';
+    if (!panel.style.top) panel.style.top = rect.top + 'px';
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+    e.preventDefault();
+  });
+}
+
+// Socket
+function initSocket() {
+  if (socket) socket.disconnect();
+  socket = io();
+  socket.on('connect', () => setStatus('Connected', 'success'));
+  socket.on('disconnect', () => setStatus('Disconnected', 'warning'));
+  socket.on('testing_update', data => {
     try {
-        const response = await fetch('/api/get-testing-status');
-        const data = await response.json();
-        
-        if (data.has_active_testing) {
-            console.log('🔄 Found active testing session, restoring...');
-            
-            // Show testing UI
-            showTestingProgress();
-            initializeTestingTable();
-            
-            // Restore results
-            updateLiveResults(data.results);
-            
-            // Update progress
-            updateTestingProgress({
-                results: data.results,
-                total: data.total,
-                completed: data.completed
-            });
-            
-            // Reconnect to socket for live updates
-            if (socket) {
-                console.log('📡 Reconnecting to testing updates...');
-            }
-            
-            // USER REQUEST: Clear textarea after testing starts/resumes
-            clearVpnInput();
-        }
-    } catch (error) {
-        console.error('Error checking testing status:', error);
+      // plannedTotal tetap dari awal; jika belum ada, ambil dari event
+      if (!plannedTotal) plannedTotal = getTotalValue(data);
+      processResults(data.results || []);
+      // progress berdasarkan tabel final yang tampil
+      setProgress(displayOrder.length, plannedTotal);
+      rerenderTableInCompletionOrder(plannedTotal);
+      updateSummary();
+    } catch (err) { console.error(err); }
+  });
+  socket.on('testing_complete', data => {
+    try {
+      if (!plannedTotal) plannedTotal = data.total ?? getTotalValue(data);
+      processResults(data.results || []);
+      setProgress(displayOrder.length, plannedTotal);
+      rerenderTableInCompletionOrder(plannedTotal);
+      updateSummary();
+      toast('Testing complete', 'success');
+    } catch (err) { console.error(err); }
+  });
+  socket.on('testing_error', data => {
+    toast(data?.message || 'Testing error', 'error');
+    setStatus('Error', 'error');
+  });
+  socket.on('config_generated', data => {
+    if (data.success) toast('Config generated', 'success'); else toast(`Config error: ${data.error}`, 'error');
+  });
+}
+
+// Rows (keyed by index to avoid duplicates)
+const rowMap = new Map(); // index -> <tr>
+function renderRows(list, _finalize=false) {
+  const tbody = $('#results-body'); if (!tbody) return;
+  // Keep only valid objects with an index
+  const items = (Array.isArray(list) ? list : []).filter(r => r && typeof r === 'object' && Number.isFinite(r.index));
+  const incoming = new Set(items.map(r => r.index));
+
+  // Remove rows that are no longer present
+  for (const [idx, tr] of rowMap.entries()) {
+    if (!incoming.has(idx)) {
+      tr.remove();
+      rowMap.delete(idx);
     }
-}
+  }
 
-// USER REQUEST: Handle setup source change (Template vs GitHub) - Smart detect
-function handleSetupSourceChange(event) {
-    const selectedSource = event.target.value;
-    const githubCard = document.getElementById('github-setup-card');
-    const templateCard = document.getElementById('template-status-card');
-    
-    if (selectedSource === 'github') {
-        githubCard.style.display = 'block';
-        templateCard.style.display = 'none';
-        
-        // Load saved GitHub config from database
-        loadSavedGitHubConfig();
-    } else {
-        githubCard.style.display = 'none';
-        templateCard.style.display = 'block';
-        
-        // Show template ready status
-        showSetupStatus('Template configuration ready. Start testing to use local template.', 'success');
+  // Upsert rows
+  for (const r of items) {
+    const status = normalizeStatus(r.Status);
+    let tr = rowMap.get(r.index);
+    if (!tr) {
+      tr = document.createElement('tr');
+      tr.id = `row-${r.index}`;
+      rowMap.set(r.index, tr);
+      tbody.appendChild(tr);
     }
-}
-
-// USER REQUEST: Smart detect - auto-load configuration saat start testing
-function getSelectedConfigSource() {
-    const selectedRadio = document.querySelector('input[name="setup-source"]:checked');
-    return selectedRadio ? selectedRadio.value : 'template';
-}
-
-// Load configuration based on selected source
-async function loadConfigurationBasedOnSource() {
-    const source = getSelectedConfigSource();
-    console.log(`🔧 DEBUG: loadConfigurationBasedOnSource called, source=${source}`);
-    
-    if (source === 'template') {
-        // Auto-load template configuration
-        console.log('📁 DEBUG: Loading template configuration...');
-        try {
-            const response = await fetch('/api/load-template-config');
-            const data = await response.json();
-            console.log('📁 DEBUG: Template response:', data);
-            
-            if (data.success) {
-                console.log('✅ DEBUG: Template configuration loaded automatically');
-                return { success: true, source: 'template' };
-            } else {
-                throw new Error(data.message);
-            }
-        } catch (error) {
-            console.error('❌ DEBUG: Template auto-load error:', error);
-            showToast('Template Error', 'Failed to load template configuration', 'error');
-            return { success: false, source: 'template', error: error.message };
-        }
-    } else {
-        // Use GitHub configuration (already saved)
-        console.log('🐙 DEBUG: Using saved GitHub configuration');
-        return { success: true, source: 'github' };
-    }
-}
-
-// Show setup status message
-function showSetupStatus(message, type) {
-    const statusCard = document.getElementById('setup-status');
-    const statusMessage = document.getElementById('setup-status-message');
-    
-    statusMessage.textContent = message;
-    statusMessage.className = `status-message ${type}`;
-    statusCard.style.display = 'block';
-}
-
-// USER REQUEST: Clear VPN input textarea
-function clearVpnInput() {
-    const textarea = document.getElementById('vpn-links');
-    if (textarea) {
-        textarea.value = '';
-        // Also reset smart detection indicator
-        const indicator = document.getElementById('detection-indicator');
-        if (indicator) {
-            indicator.innerHTML = `
-                <span class="detection-icon">🤖</span>
-                <span class="detection-text">Ready for smart detection...</span>
-            `;
-        }
-    }
-}
-
-// Hide loading screen and show app
-function hideLoadingScreen() {
-    const loadingScreen = document.getElementById('loading-screen');
-    const app = document.getElementById('app');
-    
-    loadingScreen.style.opacity = '0';
-    loadingScreen.style.visibility = 'hidden';
-    
-    app.classList.remove('hidden');
-}
-
-// Initialize Socket.IO connection
-function initializeSocket() {
-    socket = io();
-    
-    socket.on('connect', function() {
-        console.log('Connected to server');
-        updateStatus('Connected', 'success');
-    });
-    
-    socket.on('disconnect', function() {
-        console.log('Disconnected from server');
-        updateStatus('Disconnected', 'error');
-    });
-    
-    socket.on('testing_update', function(data) {
-        console.log('🔍 DEBUG: Received testing_update:', data);
-        console.log(`🔍 DEBUG: Data contains ${data.results?.length || 0} results, ${data.completed}/${data.total} completed`);
-        updateTestingProgress(data);
-    });
-    
-    socket.on('testing_complete', function(data) {
-        console.log('Received testing_complete:', data);
-        handleTestingComplete(data);
-    });
-    
-    socket.on('config_generated', function(data) {
-        handleConfigGenerated(data);
-    });
-    
-    socket.on('testing_error', function(data) {
-        showToast('Testing Error', data.message, 'error');
-        hideTestingProgress();
-    });
-}
-
-// USER REQUEST: Navigation functions removed - single page layout only
-
-// Setup all event listeners
-function setupEventListeners() {
-    // GitHub configuration source radio buttons
-    const configSourceRadios = document.querySelectorAll('input[name="config-source"]');
-    configSourceRadios.forEach(radio => {
-        radio.addEventListener('change', handleConfigSourceChange);
-    });
-    
-    // Add links and test
-    document.getElementById('add-and-test-btn').addEventListener('click', addLinksAndTest);
-    
-    // Smart detection preview
-    document.getElementById('vpn-links').addEventListener('input', function() {
-        updateSmartDetectionPreview(this.value);
-    });
-    
-    // Input change handler for replacement stats (auto-update)
-    document.getElementById('replacement-servers').addEventListener('input', updateReplacementStats);
-    
-    // Download configuration
-    const dlBtn = document.getElementById('download-config-btn');
-    if (dlBtn) dlBtn.addEventListener('click', downloadConfiguration);
-    
-    // Upload to GitHub
-    const upBtn = document.getElementById('upload-github-btn');
-    if (upBtn) upBtn.addEventListener('click', uploadToGitHub);
-
-    // Advanced (Auto Fetch) handlers
-    const toggleBtn = document.getElementById('toggle-advanced');
-    const advPanel = document.getElementById('advanced-panel');
-    const advDesc = document.getElementById('adv-desc');
-    const advInfo = document.getElementById('adv-info-btn');
-    if (toggleBtn && advPanel) {
-        toggleBtn.addEventListener('click', () => {
-            const show = advPanel.style.display === 'none';
-            advPanel.style.display = show ? 'block' : 'none';
-            toggleBtn.textContent = show ? 'Hide' : 'Show';
-        });
-    }
-    if (advInfo && advDesc) {
-        advInfo.addEventListener('click', () => {
-            const show = advDesc.style.display === 'none';
-            advDesc.style.display = show ? 'block' : 'none';
-            advInfo.setAttribute('aria-expanded', String(show));
-        });
-    }
-    const advPreviewBtn = document.getElementById('adv-preview-btn');
-    const advFetchAddBtn = document.getElementById('adv-fetch-add-btn');
-    if (advPreviewBtn) advPreviewBtn.addEventListener('click', previewAdvancedUrls);
-    if (advFetchAddBtn) advFetchAddBtn.addEventListener('click', fetchAndAddAdvanced);
-}
-
-// Setup form handlers
-function setupFormHandlers() {
-    // USER REQUEST: Setup source options (Template vs GitHub)
-    document.querySelectorAll('input[name="setup-source"]').forEach(radio => {
-        radio.addEventListener('change', handleSetupSourceChange);
-    });
-    
-    // GitHub setup
-    document.getElementById('setup-github-btn').addEventListener('click', setupGitHub);
-    
-    // Template setup - USER REQUEST: Smart detect, no manual load button
-    
-    // Add links and test
-    document.getElementById('add-and-test-btn').addEventListener('click', addLinksAndTest);
-    
-    // Smart detection preview
-    document.getElementById('vpn-links').addEventListener('input', function() {
-        updateSmartDetectionPreview(this.value);
-    });
-    
-    // Input change handler for replacement stats (auto-update)
-    document.getElementById('replacement-servers').addEventListener('input', updateReplacementStats);
-    
-    // Download configuration
-    document.getElementById('download-config-btn').addEventListener('click', downloadConfiguration);
-    
-    // Upload to GitHub
-    document.getElementById('upload-github-btn').addEventListener('click', uploadToGitHub);
-
-    // Advanced (Auto Fetch) handlers
-    const toggleBtn = document.getElementById('toggle-advanced');
-    const advPanel = document.getElementById('advanced-panel');
-    if (toggleBtn && advPanel) {
-        toggleBtn.addEventListener('click', () => {
-            const show = advPanel.style.display === 'none';
-            advPanel.style.display = show ? 'block' : 'none';
-            toggleBtn.textContent = show ? 'Hide' : 'Show';
-        });
-    }
-    const advPreviewBtn = document.getElementById('adv-preview-btn');
-    const advFetchAddBtn = document.getElementById('adv-fetch-add-btn');
-    if (advPreviewBtn) advPreviewBtn.addEventListener('click', previewAdvancedUrls);
-    if (advFetchAddBtn) advFetchAddBtn.addEventListener('click', fetchAndAddAdvanced);
-}
-
-// Get selected testing mode
-function getSelectedTestingMode() {
-    const el = document.querySelector('input[name="testing-mode"]:checked');
-    return el ? el.value : 'accurate'; // default accurate
-}
-
-// Handle configuration source change
-function handleConfigSourceChange(event) {
-    const githubFileSelection = document.getElementById('github-file-selection');
-    
-    if (event.target.value === 'github') {
-        if (isGitHubConfigured) {
-            githubFileSelection.classList.remove('hidden');
-            loadGitHubFiles();
-        } else {
-            showToast('GitHub Required', 'Please configure GitHub integration first', 'warning');
-            document.querySelector('input[name="config-source"][value="local"]').checked = true;
-        }
-    } else {
-        githubFileSelection.classList.add('hidden');
-    }
-}
-
-// Update status indicator
-function updateStatus(text, type = 'info') {
-    const statusText = document.getElementById('status-text');
-    const statusDot = document.querySelector('.status-dot');
-    const statusSummary = document.getElementById('status-summary');
-    
-    if (statusText) statusText.textContent = text;
-    if (statusSummary) statusSummary.textContent = text;
-    
-    if (statusDot) {
-        statusDot.classList.remove('success', 'error', 'warning', 'info');
-        statusDot.classList.add(type);
-        const colors = { success: '#10b981', error: '#ef4444', warning: '#f59e0b', info: '#3b82f6' };
-        statusDot.style.background = colors[type] || colors.info;
-    }
-}
-
-// Show toast notification
-function showToast(title, message, type = 'info') {
-    const container = document.getElementById('toast-container');
-    const toast = document.createElement('div');
-    
-    toast.className = `toast ${type}`;
-    toast.innerHTML = `
-        <div class="toast-icon"></div>
-        <div class="toast-content">
-            <div class="toast-title">${title}</div>
-            <div class="toast-message">${message}</div>
-        </div>
+    tr.innerHTML = `
+      <td>${escapeHtml(r.OriginalTag || r.tag || '')}</td>
+      <td>${escapeHtml(r.VpnType || r.type || '')}</td>
+      <td>${escapeHtml(r['Tested IP'] || r.server || '-')}</td>
+      <td>${fmtLatency(r.Latency)}</td>
+      <td>${escapeHtml(r.Country || '❓')}</td>
+      <td class="${statusClass(status)}">${status}</td>
     `;
-    
-    container.appendChild(toast);
-    
-    // Trigger animation
-    setTimeout(() => {
-        toast.classList.add('show');
-    }, 100);
-    
-    // Auto remove after 5 seconds
-    setTimeout(() => {
-        removeToast(toast);
-    }, 5000);
-    
-    // Click to dismiss
-    toast.addEventListener('click', () => {
-        removeToast(toast);
-    });
+  }
 }
 
-// Remove toast notification
-function removeToast(toast) {
-    toast.classList.remove('show');
-    setTimeout(() => {
-        if (toast.parentNode) {
-            toast.parentNode.removeChild(toast);
-        }
-    }, 300);
+function escapeHtml(s){ return (s??'').toString().replace(/[&<>"]/g, m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;"}[m])); }
+function normalizeStatus(s){ if (s==='●') return '✅'; if (s?.startsWith('✖')) return '❌'; return s || '⏳'; }
+function statusClass(s){ if (s==='✅') return 'badge-ok'; if (s==='❌' || s==='Dead') return 'badge-fail'; if (s==='⏳' || s==='🔄' || s==='🔁' || s==='WAIT') return 'badge-wait'; return ''; }
+
+// Summary
+function updateSummary(list){
+  // Hitung berdasarkan baris final yang tampil (displayOrder)
+  const shown = displayOrder.map(idx => latestByIndex.get(idx)).filter(Boolean);
+  const ok = shown.filter(r=>r.Status==='✅').length;
+  const bad = shown.filter(r=>r.Status==='❌' || r.Status==='Dead').length;
+  const lat = (()=>{ const l=shown.filter(r=>r.Status==='✅' && r.Latency>-1).map(r=>+r.Latency); if(!l.length) return '–'; const avg=Math.round(l.reduce((a,b)=>a+b,0)/l.length); return `${avg} ms`; })();
+  $('#stat-success').textContent = ok; $('#stat-failed').textContent = bad; $('#stat-latency').textContent = lat;
 }
 
-// Set button loading state
-function setButtonLoading(buttonId, loading = true) {
-    const button = document.getElementById(buttonId);
-    const btnText = button.querySelector('.btn-text');
-    const btnLoader = button.querySelector('.btn-loader');
-    
-    if (loading) {
-        button.disabled = true;
-        btnText.style.opacity = '0';
-        btnLoader.classList.remove('hidden');
+// API
+async function api(path, opts){
+  console.debug('[API]', path, opts?.method || 'GET');
+  const r = await fetch(path, opts);
+  console.debug('[API][resp]', path, r.status);
+  if(!r.ok) throw new Error(`${r.status}`);
+  return r.json();
+}
+
+// Config Source UI
+function currentSource(){ return document.querySelector('input[name="config-source"]:checked')?.value || 'template'; }
+function switchSourceUI(){ const gh = $('#github-panel'); if (currentSource()==='github') gh.classList.remove('hidden'); else gh.classList.add('hidden'); }
+
+// GitHub saved config
+async function loadSavedGitHub(){
+  try {
+    const d = await api('/api/get-github-config');
+    if (d.success) {
+      if (d.owner) $('#gh-owner').value = d.owner;
+      if (d.repo) $('#gh-repo').value = d.repo;
+    }
+  } catch {}
+}
+
+// Restore testing status
+async function restoreTesting(){
+  try {
+    const d = await api('/api/get-testing-status');
+    if (d.has_active_testing) {
+      plannedTotal = d.total ?? getTotalValue(d);
+      // Biarkan proses update socket mengisi tabel; set indikator awal
+      setProgress(0, plannedTotal);
+      setStatus('Restored','success');
+    }
+  } catch {}
+}
+
+// Actions
+async function loadConfig(){
+  try {
+    if (currentSource()==='template') {
+      try { await api('/api/load-template-config'); } catch {}
+      const data = await api('/api/load-config', {
+        method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source:'local' })
+      });
+      if (data.success) { toast(data.message || 'Template loaded', 'success'); setStatus('Template loaded','success'); }
+      else { toast(data.message || 'Load failed','error'); setStatus('Load failed','error'); }
     } else {
-        button.disabled = false;
-        btnText.style.opacity = '1';
-        btnLoader.classList.add('hidden');
+      const token = $('#gh-token').value.trim(); const owner=$('#gh-owner').value.trim(); const repo=$('#gh-repo').value.trim();
+      if (token && owner && repo) {
+        const s = await api('/api/save-github-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({token,owner,repo})});
+        if (!s.success) { toast(s.message||'Save GitHub failed','error'); return; }
+      }
+      toast('GitHub ready','success'); setStatus('GitHub ready','success');
     }
+  } catch (err) { console.error(err); toast('Action failed','error'); }
 }
 
-// GitHub Integration Functions
-async function setupGitHub() {
-    const token = document.getElementById('github-token').value.trim();
-    const owner = document.getElementById('github-owner').value.trim();
-    const repo = document.getElementById('github-repo').value.trim();
-    
-    if (!token || !owner || !repo) {
-        showToast('Missing Information', 'Please fill in all GitHub fields', 'warning');
-        return;
-    }
-    
-    setButtonLoading('setup-github-btn', true);
-    updateStatus('Configuring GitHub...', 'info');
-    
-    try {
-        // USER REQUEST: Save GitHub config to database
-        const response = await fetch('/api/save-github-config', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ token, owner, repo }),
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            updateGitHubStatus('Configured');
-            showToast('GitHub Saved', 'GitHub configuration saved successfully!', 'success');
-            updateStatus('GitHub configuration saved', 'success');
-            
-            // USER REQUEST: No manual file selection, will auto-detect saat start testing
-            showSetupStatus('GitHub configuration saved. Start testing to automatically use GitHub config.', 'success');
-        } else {
-            updateGitHubStatus('Error');
-            showToast('Save Failed', data.message, 'error');
-            updateStatus('GitHub save failed', 'error');
-        }
-    } catch (error) {
-        console.error('GitHub setup error:', error);
-        updateGitHubStatus('error');
-        showToast('Network Error', 'Failed to connect to server', 'error');
-        updateStatus('Network error', 'error');
-    } finally {
-        setButtonLoading('setup-github-btn', false);
-    }
-}
+async function listGithub(){ try { const f = await api('/api/list-github-files'); const sel = $('#gh-files'); sel.innerHTML=''; (f.files||[]).forEach(x=>{ const opt=document.createElement('option'); opt.value=x.path; opt.textContent=x.name; sel.appendChild(opt); }); toast('Files loaded','success'); } catch(err){ console.error(err); toast('List failed','error'); } }
+async function loadGithubFile(){ try { const file=$('#gh-files').value; if(!file){ toast('Select file','warning'); return; } const d=await api('/api/load-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'github',file_path:file})}); if(d.success){ toast(d.message||'Loaded','success'); } else { toast(d.message||'Load failed','error'); } } catch(err){ console.error(err); toast('Load failed','error'); } }
 
-// Update GitHub status badge
-function updateGitHubStatus(status) {
-    const badge = document.getElementById('github-status');
-    
-    badge.classList.remove('success', 'error');
-    
-    if (status === 'success') {
-        badge.textContent = 'Configured';
-        badge.classList.add('success');
-    } else if (status === 'error') {
-        badge.textContent = 'Error';
-        badge.classList.add('error');
-    } else {
-        badge.textContent = 'Not Configured';
-    }
-}
-
-// Load GitHub files
-async function loadGitHubFiles() {
-    if (!isGitHubConfigured) return;
-    
-    const select = document.getElementById('github-files');
-    select.innerHTML = '<option value="">Loading...</option>';
-    
-    try {
-        const response = await fetch('/api/list-github-files');
-        const data = await response.json();
-        
-        if (data.success) {
-            select.innerHTML = '<option value="">Select a file...</option>';
-            data.files.forEach(file => {
-                const option = document.createElement('option');
-                option.value = file.path;
-                option.textContent = file.name;
-                select.appendChild(option);
-            });
-        } else {
-            select.innerHTML = '<option value="">Error loading files</option>';
-            showToast('Load Error', data.message, 'error');
-        }
-    } catch (error) {
-        console.error('Load GitHub files error:', error);
-        select.innerHTML = '<option value="">Network error</option>';
-        showToast('Network Error', 'Failed to load GitHub files', 'error');
-    }
-}
-
-// USER REQUEST: Load saved GitHub configuration from database with auto-fill
-async function loadSavedGitHubConfig() {
-    try {
-        const response = await fetch('/api/get-github-config');
-        const data = await response.json();
-        
-        if (data.success) {
-            // Auto-fill owner (from database)
-            if (data.owner) {
-                document.getElementById('github-owner').value = data.owner;
-            }
-            
-            // Auto-fill repo but keep it editable (USER REQUEST)
-            if (data.repo) {
-                document.getElementById('github-repo').value = data.repo;
-            }
-            
-            // Show token status without revealing actual token
-            if (data.has_token) {
-                document.getElementById('github-token').placeholder = 'Token saved (enter new token to update)';
-                updateGitHubStatus('Configured');
-            } else {
-                updateGitHubStatus('Token Required');
-            }
-        } else {
-            console.log('No saved GitHub config found');
-            updateGitHubStatus('Not Configured');
-        }
-    } catch (error) {
-        console.error('Error loading GitHub config:', error);
-        updateGitHubStatus('Error');
-    }
-}
-
-// Auto-load configuration on startup
-async function autoLoadConfiguration() {
-    const requestData = { source: 'local' };
-    
-    try {
-        const response = await fetch('/api/load-config', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(requestData),
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            updateStatus('Template loaded', 'success');
-            showSetupStatus('Local template loaded successfully', 'success');
-        } else {
-            updateStatus('Template load failed', 'warning');
-            showSetupStatus('Failed to load local template', 'error');
-        }
-    } catch (error) {
-        console.error('Auto-load configuration error:', error);
-        updateStatus('Template unavailable', 'warning');
-        showSetupStatus('Template file not found', 'error');
-    }
-}
-
-// Manual configuration loading
-async function loadConfiguration() {
-    const configSource = document.querySelector('input[name="config-source"]:checked').value;
-    let requestData = { source: configSource };
-    
-    if (configSource === 'github') {
-        const filePath = document.getElementById('github-files').value;
-        if (!filePath) {
-            showToast('File Required', 'Please select a GitHub file', 'warning');
-            return;
-        }
-        requestData.file_path = filePath;
-    }
-    
-    setButtonLoading('load-config-btn', true);
-    updateStatus('Loading configuration...', 'info');
-    
-    try {
-        const response = await fetch('/api/load-config', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify(requestData),
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showToast('Success', data.message, 'success');
-            updateStatus('Configuration loaded', 'success');
-            showSetupStatus(data.message, 'success');
-        } else {
-            showToast('Load Failed', data.message, 'error');
-            updateStatus('Load failed', 'error');
-            showSetupStatus(data.message, 'error');
-        }
-    } catch (error) {
-        console.error('Load configuration error:', error);
-        showToast('Network Error', 'Failed to load configuration', 'error');
-        updateStatus('Network error', 'error');
-        showSetupStatus('Network error occurred', 'error');
-    } finally {
-        setButtonLoading('load-config-btn', false);
-    }
-}
-
-// Show setup status message
-function showSetupStatus(message, type) {
-    const statusCard = document.getElementById('setup-status');
-    const statusMessage = document.getElementById('setup-status-message');
-    
-    statusMessage.textContent = message;
-    statusMessage.className = `status-message ${type}`;
-    statusCard.style.display = 'block';
-}
-
-// Smart detection preview
-function updateSmartDetectionPreview(text) {
-    const indicator = document.getElementById('detection-indicator');
-    const iconSpan = indicator.querySelector('.detection-icon');
-    const textSpan = indicator.querySelector('.detection-text');
-    
-    if (!text.trim()) {
-        iconSpan.textContent = '🤖';
-        textSpan.textContent = 'Ready for smart detection...';
-        return;
-    }
-    
-    // Simple client-side detection preview
-    const vpnPattern = /(?:vless|vmess|trojan|ss):\/\/[^\s]+/g;
-    const vpnMatches = text.match(vpnPattern) || [];
-    
-    const urlPattern = /https?:\/\/[^\s]+/g;
-    const urlMatches = text.match(urlPattern) || [];
-    
-    if (vpnMatches.length > 0) {
-        iconSpan.textContent = '🔗';
-        textSpan.textContent = `Detected ${vpnMatches.length} VPN link${vpnMatches.length > 1 ? 's' : ''} - Ready to parse!`;
-    } else if (urlMatches.length === 1) {
-        iconSpan.textContent = '🌐';
-        textSpan.textContent = `Detected single URL - Will auto-fetch VPN links`;
-    } else if (urlMatches.length > 1) {
-        iconSpan.textContent = '📚';
-        textSpan.textContent = `Detected ${urlMatches.length} URLs - Will fetch from all sources`;
-    } else {
-        iconSpan.textContent = '❓';
-        textSpan.textContent = 'No VPN links or URLs detected yet...';
-    }
-}
-
-// Add links and start testing - USER REQUEST: Smart detect config source
-async function addLinksAndTest() {
-    const inputText = document.getElementById('vpn-links').value.trim();
-    
-    if (!inputText) {
-        showToast('No Input', 'Please paste VPN links or URLs', 'warning');
-        return;
-    }
-    
-    setButtonLoading('add-and-test-btn', true);
-    updateStatus('🤖 Smart processing input...', 'info');
-    
-    // USER REQUEST: Smart detect dan auto-load configuration
-    console.log('🔧 DEBUG: Loading configuration based on source...');
-    const configResult = await loadConfigurationBasedOnSource();
-    console.log('🔧 DEBUG: Config result:', configResult);
-    
-    if (!configResult.success) {
-        console.log('❌ DEBUG: Configuration load failed:', configResult);
-        setButtonLoading('add-and-test-btn', false);
-        updateStatus('Configuration load failed', 'error');
-        return;
-    }
-    
-    console.log(`✅ DEBUG: Using ${configResult.source} configuration for testing`);
-    
-    try {
-        const response = await fetch('/api/add-links-and-test', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ 
-                links: inputText
-            }),
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showToast('Success', data.message, 'success');
-            updateStatus('Starting tests...', 'info');
-            
-            // Update account counts
-            totalAccounts = data.total_accounts;
-            document.getElementById('total-accounts').textContent = totalAccounts;
-            document.getElementById('test-status').textContent = '🔄';
-            
-            // Load parsed accounts for server replacement
-            await loadParsedAccounts();
-            
-            // Show quick stats
-            document.getElementById('quick-stats').style.display = 'block';
-            
-            // Clear the textarea and reset detection
-            document.getElementById('vpn-links').value = '';
-            updateSmartDetectionPreview('');
-            
-            if (data.invalid_links.length > 0) {
-                showToast('Some Invalid Links', `${data.invalid_links.length} links could not be parsed`, 'warning');
-            }
-            
-            // USER REQUEST: Single page layout - no section switching needed, start testing directly
-            startTesting();
-            
-        } else {
-            showToast('Add Failed', data.message, 'error');
-            updateStatus('Add failed', 'error');
-        }
-    } catch (error) {
-        console.error('Add links error:', error);
-        showToast('Network Error', 'Failed to add links', 'error');
-        updateStatus('Network error', 'error');
-    } finally {
-        setButtonLoading('add-and-test-btn', false);
-    }
-}
-
-// Update account counts and statistics
-async function updateAccountCounts() {
-    try {
-        const response = await fetch('/api/get-results');
-        const data = await response.json();
-        
-        totalAccounts = data.total_accounts;
-        
-        // Update UI
-        document.getElementById('total-accounts').textContent = totalAccounts;
-        document.getElementById('test-total').textContent = totalAccounts;
-        
-        // Count by type (this would need to be implemented in the backend)
-        // For now, we'll just show the total
-        document.getElementById('vless-count').textContent = '—';
-        document.getElementById('trojan-count').textContent = '—';
-        document.getElementById('ss-count').textContent = '—';
-        
-    } catch (error) {
-        console.error('Update account counts error:', error);
-    }
-}
-
-// Log activity
-function logActivity(message) {
-    const activityCard = document.getElementById('recent-activity');
-    const activityLog = document.getElementById('activity-log');
-    
-    const timestamp = new Date().toLocaleTimeString();
-    const logEntry = document.createElement('div');
-    logEntry.className = 'activity-entry';
-    logEntry.innerHTML = `
-        <span class="activity-time">${timestamp}</span>
-        <span class="activity-message">${message}</span>
-    `;
-    
-    activityLog.insertBefore(logEntry, activityLog.firstChild);
-    activityCard.style.display = 'block';
-    
-    // Keep only last 10 entries
-    while (activityLog.children.length > 10) {
-        activityLog.removeChild(activityLog.lastChild);
-    }
-}
-
-// Testing Functions
-function startTesting() {
-    console.log(`🔍 DEBUG: startTesting called, totalAccounts=${totalAccounts}`);
-    
-    if (totalAccounts === 0) {
-        console.log('❌ DEBUG: No accounts found, stopping');
-        showToast('No Accounts', 'Please add some VPN accounts first', 'warning');
-        return;
-    }
-    
-    console.log('✅ DEBUG: Starting testing process...');
-    updateStatus('Starting tests...', 'info');
-    
-    showTestingProgress();
-    
-    // Start testing via Socket.IO
-    console.log('📡 DEBUG: Emitting start_testing to backend...');
-    const mode = getSelectedTestingMode();
-    const payload = { mode };
-    if (mode === 'hybrid') {
-        const nEl = document.getElementById('hybrid-top-n');
-        const n = parseInt(nEl?.value || '20', 10);
-        payload.topN = isNaN(n) ? 20 : Math.max(1, Math.min(999, n));
-    }
+// Add & Start
+function setMode(mode){ currentMode = 'default'; setModePill('XRAY'); }
+async function addAndStart(){
+  try {
+    const text = $('#vpn-input').value.trim(); if (!text){ toast('No input','warning'); return; }
+    if (currentSource()==='template') { try { await api('/api/load-template-config'); } catch {} await api('/api/load-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'local'})}); }
+    const res = await api('/api/add-links-and-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({links:text})});
+    if (!res.success){ toast(res.message||'Add failed','error'); return; }
+    resetTableState();
+    plannedTotal = getTotalValue(res);
+    setProgress(0, plannedTotal);
+    $('#vpn-input').value=''; toast('Starting tests…','info');
+    // Show one global skeleton immediately to signal progress
+    ensureGlobalSkeleton(true);
+    const payload = { mode: 'xray-only' };
     socket.emit('start_testing', payload);
-    console.log('📡 DEBUG: start_testing emitted successfully');
+  } catch (err) { console.error(err); toast('Start failed','error'); }
 }
 
-// Show testing progress UI
-function showTestingProgress() {
-    document.getElementById('testing-progress').style.display = 'block';
-    document.getElementById('live-results').style.display = 'block';
-    
-    // Reset progress
-    updateProgressBar(0);
-    updateTestStats(0, 0, 0);
-    
-    // Initialize table with empty rows to show structure
-    initializeTestingTable();
+// Servers apply & Generate
+async function applyServers(){
+  try {
+    const servers = $('#servers-input').value.trim();
+    const d = await api('/api/generate-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({custom_servers:servers})});
+    if (d.success) toast(`Config updated (${d.account_count} accounts)`, 'success'); else toast(d.message||'Generate failed','error');
+  } catch (err) { console.error(err); toast('Generate failed','error'); }
 }
 
-// Global tracking for progressive table display
-let displayedAccountsCount = 0;
-let globalTestOrder = new Map(); // Maps result ID to global display order
-
-// Initialize testing table (USER REQUEST: Empty table, show accounts as they are tested)
-function initializeTestingTable() {
-    const tableBody = document.getElementById('testing-table-body');
-    if (!tableBody) return;
-    
-    // USER REQUEST: Start with empty table, populate as tests progress
-    tableBody.innerHTML = '';
-    displayedAccountsCount = 0;
-    globalTestOrder.clear();
-    
-    console.log('🔄 Initialized empty testing table - accounts will appear as they are tested');
+// Download & Upload
+async function downloadConfig(){
+  try {
+    const r = await fetch('/api/download-config');
+    if (!r.ok) { toast('No config to download','warning'); return; }
+    const blob = await r.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'VortexVpn.json'; a.click(); URL.revokeObjectURL(url);
+  } catch (err) { console.error(err); toast('Download failed','error'); }
 }
 
-// Hide testing progress UI
-function hideTestingProgress() {
-    updateStatus('Testing stopped', 'warning');
+function toggleUploadPanel(){ $('#upload-panel').classList.toggle('hidden'); }
+async function doUpload(){
+  try {
+    const commit_message = $('#commit-message').value.trim() || 'Update VPN configuration';
+    const d = await api('/api/upload-to-github',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({commit_message})});
+    if (d.success) { toast(d.message||'Uploaded','success'); toggleUploadPanel(); } else { toast(d.message||'Upload failed','error'); }
+  } catch (err) { console.error(err); toast('Upload failed','error'); }
 }
 
-// Update testing progress
-function updateTestingProgress(data) {
-    console.log('🔍 DEBUG: updateTestingProgress called with:', data); // Debug log
-    
-    if (!data || !data.results) {
-        console.error('❌ DEBUG: Invalid data received:', data);
-        return;
-    }
-    
-    console.log(`🔍 DEBUG: Processing ${data.results.length} results`);
-    
-    const pendingStates = ['WAIT', '🔄', '🔁'];
-    const completed = data.results.filter(r => !pendingStates.includes(r.Status)).length;
-    const total = data.total || data.results.length;
-    const percentage = total > 0 ? Math.round((completed / total) * 100) : 0;
-    
-    updateProgressBar(percentage);
-    
-    const progressTextEl = document.getElementById('progress-text');
-    const progressPctEl = document.getElementById('progress-percent');
-    if (progressTextEl) progressTextEl.textContent = `${completed} / ${total} accounts tested`;
-    if (progressPctEl) progressPctEl.textContent = `${percentage}%`;
-    
-    const successful = data.results.filter(r => r.Status === '✅' || r.Status === '●').length;
-    const failed = data.results.filter(r => r.Status === '❌' || r.Status.startsWith('✖')).length;
-    const testing = data.results.filter(r => pendingStates.includes(r.Status)).length;
-    
-    updateTestStats(successful, failed, testing);
-    
-    // New status bar fill
-    const statusFill = document.getElementById('status-fill');
-    if (statusFill) statusFill.style.width = percentage + '%';
-    
-    updateLiveResults(data.results);
-    
-    updateStatus(`Testing... ${completed}/${total}`, 'info');
+// Global error handler
+window.addEventListener('error', (e) => { try { toast(`Error: ${e.message}`, 'error'); } catch {} });
+window.addEventListener('unhandledrejection', (e) => { try { toast(`Request failed`, 'error'); } catch {} });
+
+// Init
+function bindEvents(){
+  console.debug('[UI] bindEvents');
+  bindInfoTips();
+  bindRipple();
+  bindFloatingControls();
+  $all('input[name="config-source"]').forEach(r=>r.addEventListener('change', () => { console.debug('[UI] source change'); switchSourceUI(); }));
+  const b1=$('#btn-load-config'); if (b1) b1.addEventListener('click', () => { toast('Loading config…','info'); console.debug('[Action] loadConfig'); loadConfig(); });
+  const b2=$('#btn-save-gh'); if (b2) b2.addEventListener('click', () => { toast('Saving GitHub…','info'); console.debug('[Action] saveGitHub'); loadConfig(); });
+  const b3=$('#btn-list-gh'); if (b3) b3.addEventListener('click', () => { toast('Listing files…','info'); console.debug('[Action] listGitHub'); listGithub(); });
+  const b4=$('#btn-load-gh'); if (b4) b4.addEventListener('click', () => { toast('Loading file…','info'); console.debug('[Action] loadGitHubFile'); loadGithubFile(); });
+  const b5=$('#btn-add-test'); if (b5) b5.addEventListener('click', () => { toast('Adding & starting…','info'); console.debug('[Action] addAndStart'); addAndStart(); });
+  // mode removed
+  const b6=$('#btn-apply-servers'); if (b6) b6.addEventListener('click', () => { toast('Applying servers…','info'); console.debug('[Action] applyServers'); applyServers(); });
+  const b7=$('#btn-download-config'); if (b7) b7.addEventListener('click', () => { toast('Downloading…','info'); console.debug('[Action] downloadConfig'); downloadConfig(); });
+  const b8=$('#btn-upload-github'); if (b8) b8.addEventListener('click', () => { console.debug('[UI] toggleUploadPanel'); toggleUploadPanel(); });
+  const b9=$('#btn-do-upload'); if (b9) b9.addEventListener('click', () => { toast('Uploading…','info'); console.debug('[Action] doUpload'); doUpload(); });
 }
 
-// Handle testing completion
-function handleTestingComplete(data) {
-    console.log('🎯 DEBUG: handleTestingComplete called with:', data);
-    
-    updateStatus(`Testing complete: ${data.successful}/${data.total} successful`, 'success');
-    
-    showToast('Testing Complete', `${data.successful} out of ${data.total} accounts passed`, 'success');
-    
-    testResults = data.results;
-    
-    // USER FIX: Update results section with both summary and detailed view
-    updateResultsSummary(data);
-    displayDetailedResults(data.results);
-    
-    console.log('📊 DEBUG: Results section populated with summary and detailed view');
-    
-    // Update test status
-    document.getElementById('test-status').textContent = data.successful > 0 ? '✅' : '❌';
-    
-    // Show notification for auto-generated config
-    if (data.successful > 0) {
-        document.getElementById('config-notification').style.display = 'block';
-    }
+async function bootstrap(){
+  try {
+    console.debug('[BOOT] start');
+    // Sanity checks
+    if (!document || !document.body) throw new Error('DOM not ready');
+    if (typeof io === 'undefined') throw new Error('Socket.IO client not loaded');
+    if (!document.querySelector('#btn-add-test')) console.warn('[BOOT] UI button #btn-add-test not found (check template)');
 
-    // Render testing summary (mode, counts, durations)
-    try {
-        const sum = data.summary || {};
-        const container = document.getElementById('results-summary');
-        if (container) {
-            container.style.display = 'block';
-            const dur1 = sum.phaseDurations?.phase1_ms;
-            const dur2 = sum.phaseDurations?.phase2_ms;
-            const fmt = ms => (typeof ms === 'number' ? `${Math.round(ms/1000)}s` : '—');
-            container.querySelector('.summary-stats').innerHTML = `
-                <div class="summary-item"><span class="summary-value">${sum.mode || '-'}</span><span class="summary-label">Mode</span></div>
-                <div class="summary-item"><span class="summary-value">${sum.nonXraySuccess ?? 0}</span><span class="summary-label">Non‑Xray Success</span></div>
-                <div class="summary-item"><span class="summary-value">${sum.xraySuccess ?? 0}</span><span class="summary-label">Xray Success</span></div>
-                <div class="summary-item"><span class="summary-value">${fmt(dur1)}</span><span class="summary-label">Phase 1</span></div>
-                <div class="summary-item"><span class="summary-value">${fmt(dur2)}</span><span class="summary-label">Phase 2</span></div>
-                ${sum.topNUsed ? `<div class="summary-item"><span class="summary-value">${sum.topNUsed}</span><span class="summary-label">Top‑N</span></div>` : ''}
-            `;
-        }
-    } catch (e) {
-        console.warn('Summary render failed:', e);
-    }
-
-    // Show export buttons
-    try {
-        const exportContainer = document.getElementById('export-buttons');
-        if (exportContainer) {
-            exportContainer.innerHTML = `
-                <div class="download-buttons">
-                    <a class="btn" href="/api/export?format=json">Export JSON</a>
-                    <a class="btn" href="/api/export?format=csv">Export CSV</a>
-                </div>`;
-        }
-    } catch (e) {
-        console.warn('Export buttons render failed:', e);
-    }
+    switchSourceUI();
+    console.debug('[BOOT] switchSourceUI ok');
+    initSocket();
+    console.debug('[BOOT] socket ok');
+    bindEvents();
+    console.debug('[BOOT] bind ok');
+    setStatus('Ready','success');
+    setMode('accurate');
+    await loadSavedGitHub();
+    console.debug('[BOOT] github ok');
+    await restoreTesting();
+    console.debug('[BOOT] restore ok');
+  } catch (err) {
+    console.error('Bootstrap error:', err);
+    toast('Init failed','error');
+  }
 }
-
-// Handle auto-generated configuration - dengan custom servers auto-apply
-async function handleConfigGenerated(data) {
-    if (data.success) {
-        // Auto-apply custom servers jika ada
-        const customServers = getCustomServersForConfig();
-        
-        if (customServers) {
-            console.log('Auto-applying custom servers:', customServers);
-            updateReplacementStatus('Auto-applying...');
-            
-            try {
-                // Generate config dengan custom servers
-                const response = await fetch('/api/generate-config', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                    },
-                    body: JSON.stringify({ custom_servers: customServers }),
-                });
-                
-                const configData = await response.json();
-                
-                if (configData.success) {
-                    updateReplacementStatus(`Applied ${configData.custom_servers_used} servers`);
-                    showToast('Config with Custom Servers', 
-                        `Configuration generated with ${configData.account_count} accounts using ${configData.custom_servers_used} custom servers`, 
-                        'success');
-                } else {
-                    updateReplacementStatus('Error');
-                    console.error('Failed to apply custom servers:', configData.message);
-                }
-            } catch (error) {
-                updateReplacementStatus('Error');
-                console.error('Error applying custom servers:', error);
-            }
-        } else {
-            showToast('Config Generated', `Configuration auto-generated with ${data.account_count} accounts`, 'success');
-        }
-        
-        // Update export section
-        document.getElementById('config-account-count').textContent = data.account_count;
-        document.getElementById('config-timestamp').textContent = new Date().toLocaleTimeString();
-        document.getElementById('config-badge').textContent = customServers ? 'Auto-Generated (Custom Servers)' : 'Auto-Generated';
-        
-        // Enable GitHub upload if configured
-        if (isGitHubConfigured) {
-            document.getElementById('github-upload-status').textContent = 'Ready';
-            document.getElementById('github-upload-status').classList.add('success');
-        }
-    } else {
-        showToast('Config Generation Failed', data.error, 'error');
-    }
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', bootstrap);
+} else {
+  bootstrap();
 }
-
-// Update progress bar
-function updateProgressBar(percentage) {
-    document.getElementById('progress-fill').style.width = `${percentage}%`;
-}
-
-// Update test statistics
-function updateTestStats(successful, failed, testing) {
-    document.getElementById('successful-count').textContent = successful;
-    document.getElementById('failed-count').textContent = failed;
-    document.getElementById('testing-count').textContent = testing;
-}
-
-// Update live results display (USER REQUEST: Progressive table, show accounts as tested)
-function updateLiveResults(results) {
-    console.log(`🔍 DEBUG: updateLiveResults called with ${results?.length || 0} results`);
-    
-    const tableBody = document.getElementById('testing-table-body');
-    if (!tableBody) {
-        console.error('❌ DEBUG: Table body not found');
-        return;
-    }
-    
-    if (!results || !Array.isArray(results)) {
-        console.error('❌ DEBUG: Invalid results data:', results);
-        return;
-    }
-    
-    console.log('🔍 DEBUG: Table body found, processing results...');
-    
-    // USER REQUEST: Progressive display - backend already filtered, process all received results
-    results.forEach((result, backendIndex) => {
-        // USER REQUEST: Use result.index as primary ID for consistency
-        const resultId = `account_${result.index !== undefined ? result.index : backendIndex}`;
-        
-        console.log(`🔍 DEBUG: Processing account ${result.index}: Status="${result.Status}", resultId="${resultId}"`);
-        
-        // Backend already filtered - all received results should be displayed
-        // Assign global display order if not already assigned
-        if (!globalTestOrder.has(resultId)) {
-            displayedAccountsCount++;
-            globalTestOrder.set(resultId, displayedAccountsCount);
-            
-            // USER REQUEST: Add new row when account starts testing
-            console.log(`🆕 DEBUG: Adding NEW account ${displayedAccountsCount} to table (index ${result.index})`);
-            console.log('🔍 DEBUG: Account data:', result);
-            addNewTestingRow(result, displayedAccountsCount);
-        } else {
-            // Update existing row
-            const displayOrder = globalTestOrder.get(resultId);
-            console.log(`🔄 DEBUG: Updating EXISTING row ${displayOrder} (index ${result.index})`);
-            updateExistingTestingRow(result, displayOrder);
-        }
-    });
-}
-
-// Add new testing row (USER REQUEST: Show account when testing starts)
-function addNewTestingRow(result, displayOrder) {
-    const tableBody = document.getElementById('testing-table-body');
-    const row = document.createElement('tr');
-    row.id = `testing-row-${displayOrder}`;
-    row.className = 'testing-row-new'; // For animation
-    
-    // Start with testing status
-    const rowHtml = createTestingRowHtml(result, displayOrder, true);
-    row.innerHTML = rowHtml;
-    
-    tableBody.appendChild(row);
-    
-    // Add slide-in animation
-    setTimeout(() => {
-        row.classList.add('testing-row-visible');
-    }, 100);
-}
-
-// Update existing testing row
-function updateExistingTestingRow(result, displayOrder) {
-    const row = document.getElementById(`testing-row-${displayOrder}`);
-    if (!row) {
-        console.warn(`Row not found for displayOrder ${displayOrder}`);
-        return;
-    }
-    
-    // USER REQUEST: Fix detection of completed tests
-    const completedStates = ['✅', '●', 'Success', '❌', 'Failed', 'Dead', 'Timeout'];
-    const isComplete = completedStates.some(state => result.Status.includes(state)) || 
-                      (!result.Status.includes('Testing') && !result.Status.includes('Retry') && !result.Status.includes('🔄'));
-    
-    console.log(`Updating row ${displayOrder}: Status="${result.Status}", isComplete=${isComplete}, Data:`, result);
-    
-    const rowHtml = createTestingRowHtml(result, displayOrder, !isComplete);
-    row.innerHTML = rowHtml;
-    
-    // Add completion animation if test is done
-    if (isComplete) {
-        row.classList.add('testing-row-completed');
-        console.log(`✅ Row ${displayOrder} marked as completed`);
-    }
-}
-
-// Create testing table row HTML (USER REQUEST: Simplified latency, animated status)
-function createTestingRowHtml(result, displayOrder, isActive = false) {
-    const safeResult = {
-        Status: result.Status || 'WAIT',
-        VpnType: result.VpnType || result.type || 'N/A',
-        Country: result.Country || '❓',
-        Provider: result.Provider || '-',
-        'Tested IP': result['Tested IP'] || result.server || '-',
-        Latency: result.Latency || -1,
-        Jitter: result.Jitter || -1,
-        ICMP: result.ICMP || 'N/A',
-        Reason: result.Reason || result.reason || ''
-    };
-    
-    // USER REQUEST: Simplified latency format (no long decimals)
-    const latencyText = formatLatency(safeResult.Latency);
-    const jitterText = formatLatency(safeResult.Jitter);
-    
-    // USER REQUEST: Animated status dot
-    const statusHtml = createAnimatedStatus(safeResult.Status, isActive, safeResult.Reason);
-    
-    return `
-        <td class="order-cell">${displayOrder}</td>
-        <td class="type-cell">${safeResult.VpnType}</td>
-        <td class="country-cell">${safeResult.Country}</td>
-        <td class="provider-cell">${safeResult.Provider}</td>
-        <td class="ip-cell">${safeResult['Tested IP']}</td>
-        <td class="latency-cell">${latencyText}</td>
-        <td class="jitter-cell">${jitterText}</td>
-        <td class="icmp-cell">${safeResult.ICMP}</td>
-        <td class="status-cell">${statusHtml}${safeResult.Reason ? `<div style="font-size:10px;color:#bbb;margin-top:4px;">${safeResult.Reason}</div>` : ''}</td>
-    `;
-}
-
-// USER REQUEST: Format latency to be simple (no long decimals) + handle timeout/dead
-function formatLatency(latency) {
-    if (latency === -1 || latency === null || latency === undefined) {
-        return '—';
-    }
-    
-    // Handle special timeout/dead cases
-    if (typeof latency === 'string') {
-        if (latency.toLowerCase().includes('timeout')) {
-            return 'Timeout';
-        }
-        if (latency.toLowerCase().includes('dead') || latency.toLowerCase().includes('unreachable')) {
-            return 'Dead';
-        }
-        if (latency.toLowerCase().includes('failed') || latency.toLowerCase().includes('error')) {
-            return 'Failed';
-        }
-    }
-    
-    const numLatency = parseFloat(latency);
-    if (isNaN(numLatency)) return '—';
-    
-    // Round to whole number for clean display
-    return `${Math.round(numLatency)}ms`;
-}
-
-// USER REQUEST: Minimalist status with dots only (no text for cleaner UI)
-function createAnimatedStatus(status, isActive, reason) {
-    const tip = reason ? `${reason}` : (status.includes('Retry') ? 'Retrying...' : (status.includes('Testing') ? 'Testing...' : status));
-    if (status.includes('Testing') || status.includes('Retry') || isActive) {
-        return `<span class="status-dot testing-dot" title="${tip}"></span>`;
-    } else if (status.includes('Timeout Retry')) {
-        // USER REQUEST: Show retry progress for timeout (dot only with tooltip)
-        const retryMatch = status.match(/Timeout Retry (\d+)\/(\d+)/);
-        const retryText = retryMatch ? retryMatch[0] : 'Retrying...';
-        return `<span class="status-dot retry-dot" title="${retryText}"></span>`;
-    } else if (status === '●' || status === '✅' || status.includes('Success')) {
-        return `<span class="status-dot success-dot" title="Success"></span>`;
-    } else if (status.includes('Timeout') || status.includes('timeout')) {
-        return `<span class="status-dot timeout-dot" title="${tip || 'Timeout'}"></span>`;
-    } else if (status.includes('Dead') || status.includes('dead') || status.includes('unreachable')) {
-        return `<span class="status-dot dead-dot" title="${tip || 'Dead'}"></span>`;
-    } else if (status.startsWith('✖') || status.includes('Failed') || status.includes('Error') || status.includes('failed')) {
-        return `<span class="status-dot failed-dot" title="${tip || 'Failed'}"></span>`;
-    } else {
-        return `<span class="status-dot waiting-dot" title="Waiting"></span>`;
-    }
-}
-
-// Create testing table row (LEGACY - keeping for compatibility)
-function createTestingTableRow(result, index) {
-    const row = document.createElement('tr');
-    
-    // Make sure we have valid data
-    const safeResult = {
-        Status: result.Status || 'WAIT',
-        VpnType: result.VpnType || result.type || 'N/A',
-        Country: result.Country || '❓',
-        Provider: result.Provider || '-',
-        'Tested IP': result['Tested IP'] || result.server || '-',
-        Latency: result.Latency || -1,
-        Jitter: result.Jitter || -1,
-        ICMP: result.ICMP || 'N/A'
-    };
-    
-    const statusText = getStatusText(safeResult.Status);
-    const statusClass = getStatusClass(safeResult.Status);
-    const latencyText = safeResult.Latency !== -1 ? `${safeResult.Latency}ms` : '—';
-    const jitterText = safeResult.Jitter !== -1 ? `${safeResult.Jitter}ms` : '—';
-    
-    row.innerHTML = `
-        <td>${index + 1}</td>
-        <td class="type-cell">${safeResult.VpnType}</td>
-        <td>${safeResult.Country}</td>
-        <td>${safeResult.Provider}</td>
-        <td>${safeResult['Tested IP']}</td>
-        <td class="latency-cell">${latencyText}</td>
-        <td class="latency-cell">${jitterText}</td>
-        <td class="status-cell">${safeResult.ICMP}</td>
-        <td class="status-cell ${statusClass}">${statusText}</td>
-    `;
-    
-    return row;
-}
-
-// Get CSS class for status
-function getStatusClass(status) {
-    if (status === '●') return 'status-success';
-    if (status.startsWith('✖')) return 'status-failed';
-    if (status.startsWith('Testing') || status.startsWith('Retry')) return 'status-testing';
-    return 'status-waiting';
-}
-
-// Get status text for display
-function getStatusText(status) {
-    // Handle both old and new status formats
-    if (status === '●' || status === '✅') return '✅';
-    if (status.startsWith('✖') || status === '❌') return '❌';
-    if (status.startsWith('Testing') || status === '🔄') return '🔄';
-    if (status.startsWith('Retry') || status === '🔁') return '🔁';
-    if (status === 'WAIT' || status === '⏳') return '⏳';
-    return status;
-}
-
-// Results Functions
-async function loadResults() {
-    try {
-        const response = await fetch('/api/get-results');
-        const data = await response.json();
-        
-        if (data.results && data.results.length > 0) {
-            testResults = data.results;
-            displayDetailedResults(data.results);
-            updateResultsSummary(data);
-            
-            if (data.has_config) {
-                showExportOptions();
-            }
-        }
-    } catch (error) {
-        console.error('Load results error:', error);
-    }
-}
-
-// Update results summary
-function updateResultsSummary(data) {
-    console.log('🔍 DEBUG: updateResultsSummary called with:', data);
-    
-    // USER FIX: Use correct status symbols ✅ and ❌
-    const successful = data.results.filter(r => r.Status === '✅').length;
-    const failed = data.results.filter(r => r.Status === '❌' || r.Status === 'Dead').length;
-    
-    console.log(`📊 DEBUG: Results summary - ${successful} successful, ${failed} failed`);
-    
-    // Calculate average latency
-    const successfulResults = data.results.filter(r => r.Status === '✅' && r.Latency !== -1);
-    const avgLatency = successfulResults.length > 0 
-        ? Math.round(successfulResults.reduce((sum, r) => sum + r.Latency, 0) / successfulResults.length)
-        : 0;
-    
-    document.getElementById('summary-successful').textContent = successful;
-    document.getElementById('summary-failed').textContent = failed;
-    document.getElementById('summary-avg-latency').textContent = `${avgLatency}ms`;
-    
-    document.getElementById('results-summary').style.display = 'block';
-    document.getElementById('detailed-results').style.display = 'block';
-}
-
-// Display detailed results
-function displayDetailedResults(results) {
-    const container = document.getElementById('results-table');
-    container.innerHTML = '';
-    
-    if (results.length === 0) {
-        container.innerHTML = '<p>No results available</p>';
-        return;
-    }
-    
-    // Create table
-    const table = document.createElement('div');
-    table.className = 'results-table';
-    
-    // Create header
-    const header = document.createElement('div');
-    header.className = 'result-header';
-    header.innerHTML = `
-        <div>Status</div>
-        <div>Location</div>
-        <div>Type</div>
-        <div>Latency</div>
-        <div>IP</div>
-    `;
-    table.appendChild(header);
-    
-    // Add results
-    results.forEach(result => {
-        const row = createDetailedResultRow(result);
-        table.appendChild(row);
-    });
-    
-    container.appendChild(table);
-}
-
-// Create detailed result row
-function createDetailedResultRow(result) {
-    const row = document.createElement('div');
-    row.className = 'result-row';
-    
-    const statusClass = getStatusClass(result.Status);
-    const latencyText = result.Latency !== -1 ? `${result.Latency}ms` : '—';
-    
-    row.innerHTML = `
-        <div class="result-status ${statusClass}"></div>
-        <div>${result.Country} ${result.Provider}</div>
-        <div>${result.VpnType.toUpperCase()}</div>
-        <div>${latencyText}</div>
-        <div>${result['Tested IP']}</div>
-    `;
-    
-    return row;
-}
-
-// Filter results
-function filterResults() {
-    const filterValue = document.getElementById('filter-status').value;
-    let filteredResults = testResults;
-    
-    if (filterValue === 'successful') {
-        filteredResults = testResults.filter(r => r.Status === '●');
-    } else if (filterValue === 'failed') {
-        filteredResults = testResults.filter(r => r.Status.startsWith('✖'));
-    }
-    
-    displayDetailedResults(filteredResults);
-}
-
-// Export Functions (Auto-generated, so no manual generation needed)
-
-async function downloadConfiguration() {
-    updateStatus('Downloading configuration...', 'info');
-    
-    try {
-        const response = await fetch('/api/download-config');
-        
-        if (response.ok) {
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = response.headers.get('Content-Disposition')?.split('filename=')[1] || 'VortexVpn-config.json';
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
-            
-            showToast('Success', 'Configuration downloaded', 'success');
-            updateStatus('Download complete', 'success');
-            logActivity('Configuration downloaded');
-        } else {
-            const data = await response.json();
-            showToast('Download Failed', data.message, 'error');
-        }
-    } catch (error) {
-        console.error('Download error:', error);
-        showToast('Network Error', 'Failed to download configuration', 'error');
-        updateStatus('Download error', 'error');
-    }
-}
-
-async function uploadToGitHub() {
-    const commitMessage = document.getElementById('commit-message').value.trim();
-    
-    if (!commitMessage) {
-        showToast('Commit Message Required', 'Please enter a commit message', 'warning');
-        return;
-    }
-    
-    setButtonLoading('upload-github-btn', true);
-    updateStatus('Uploading to GitHub...', 'info');
-    
-    try {
-        const response = await fetch('/api/upload-to-github', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ commit_message: commitMessage }),
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            showToast('Success', data.message, 'success');
-            updateStatus('Upload complete', 'success');
-            logActivity('Configuration uploaded to GitHub');
-        } else {
-            showToast('Upload Failed', data.message, 'error');
-            updateStatus('Upload failed', 'error');
-        }
-    } catch (error) {
-        console.error('Upload error:', error);
-        showToast('Network Error', 'Failed to upload to GitHub', 'error');
-        updateStatus('Upload error', 'error');
-    } finally {
-        setButtonLoading('upload-github-btn', false);
-    }
-}
-
-// Mobile-specific enhancements
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', function() {
-        navigator.serviceWorker.register('/static/sw.js')
-            .then(function(registration) {
-                console.log('ServiceWorker registration successful');
-            })
-            .catch(function(err) {
-                console.log('ServiceWorker registration failed');
-            });
-    });
-}
-
-// Handle mobile back button
-window.addEventListener('popstate', function(event) {
-    // Handle navigation history
-});
-
-// Handle orientation change
-window.addEventListener('orientationchange', function() {
-    setTimeout(() => {
-        // Refresh layout if needed
-    }, 100);
-});
-
-// Touch gestures for better mobile UX
-let touchStartY = 0;
-let touchEndY = 0;
-
-document.addEventListener('touchstart', function(event) {
-    touchStartY = event.changedTouches[0].screenY;
-}, { passive: true });
-
-document.addEventListener('touchend', function(event) {
-    touchEndY = event.changedTouches[0].screenY;
-    handleGesture();
-}, { passive: true });
-
-function handleGesture() {
-    const threshold = 50;
-    const diff = touchStartY - touchEndY;
-    
-    if (Math.abs(diff) > threshold) {
-        // Handle swipe gestures if needed
-    }
-}
-
-// Utility functions
-function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-        const later = () => {
-            clearTimeout(timeout);
-            func(...args);
-        };
-        clearTimeout(timeout);
-        timeout = setTimeout(later, wait);
-    };
-}
-
-function throttle(func, limit) {
-    let inThrottle;
-    return function() {
-        const args = arguments;
-        const context = this;
-        if (!inThrottle) {
-            func.apply(context, args);
-            inThrottle = true;
-            setTimeout(() => inThrottle = false, limit);
-        }
-    };
-}
-
-// Manual test function untuk debug
-function testTableDisplay() {
-    console.log('Testing table display with sample data...');
-    
-    const sampleData = {
-        results: [
-            {
-                index: 0,
-                VpnType: 'vless',
-                type: 'vless',
-                Country: '🇸🇬 Singapore',
-                Provider: 'CloudFlare',
-                'Tested IP': '1.1.1.1',
-                server: 'demo.example.com',
-                Latency: 25,
-                Jitter: 2,
-                ICMP: '✔',
-                Status: '●'
-            },
-            {
-                index: 1,
-                VpnType: 'trojan',
-                type: 'trojan',
-                Country: '🇯🇵 Japan',
-                Provider: 'Tokyo Server',
-                'Tested IP': '8.8.8.8',
-                server: 'demo2.example.com',
-                Latency: 45,
-                Jitter: 5,
-                ICMP: '✔',
-                Status: 'Testing...'
-            },
-            {
-                index: 2,
-                VpnType: 'shadowsocks',
-                type: 'shadowsocks',
-                Country: '❓',
-                Provider: '-',
-                'Tested IP': '-',
-                server: 'demo3.example.com',
-                Latency: -1,
-                Jitter: -1,
-                ICMP: 'N/A',
-                Status: 'WAIT'
-            }
-        ],
-        total: 3,
-        completed: 1
-    };
-    
-    updateTestingProgress(sampleData);
-}
-
-// Make it globally accessible for testing
-window.testTableDisplay = testTableDisplay;
-
-// ========================================
-// SERVER REPLACEMENT FUNCTIONALITY
-// ========================================
-
-// Global variable for parsed VPN accounts
-let parsedVpnAccounts = [];
-
-// Load parsed VPN accounts from backend
-async function loadParsedAccounts() {
-    try {
-        const response = await fetch('/api/get-accounts');
-        const data = await response.json();
-        
-        if (data.success) {
-            parsedVpnAccounts = data.accounts;
-            console.log(`Loaded ${parsedVpnAccounts.length} VPN accounts for server replacement`);
-        }
-    } catch (error) {
-        console.error('Error loading parsed accounts:', error);
-    }
-}
-
-// Update replacement stats when servers input changes
-function updateReplacementStats() {
-    const serversInput = document.getElementById('replacement-servers').value.trim();
-    const replacementStats = document.getElementById('replacement-stats');
-    const statusBadge = document.getElementById('server-replace-status');
-    
-    if (!serversInput) {
-        replacementStats.style.display = 'none';
-        statusBadge.textContent = 'Ready';
-        statusBadge.className = 'badge';
-        return;
-    }
-    
-    // Parse servers (comma or line separated)
-    const servers = parseServerInput(serversInput);
-    
-    // Update stats display
-    document.getElementById('total-vpn-accounts').textContent = parsedVpnAccounts.length || 0;
-    document.getElementById('total-servers').textContent = servers.length;
-    document.getElementById('accounts-per-server').textContent = parsedVpnAccounts.length ? 
-        `~${Math.ceil(parsedVpnAccounts.length / servers.length)}` : '0';
-    
-    replacementStats.style.display = 'block';
-    statusBadge.textContent = `${servers.length} servers ready`;
-    statusBadge.className = 'badge badge-info';
-}
-
-// Parse server input (comma or line separated)
-function parseServerInput(input) {
-    if (!input) return [];
-    
-    // Try comma separation first
-    let servers = input.split(',').map(s => s.trim()).filter(s => s);
-    
-    // If only one result, try line separation
-    if (servers.length === 1) {
-        servers = input.split('\n').map(s => s.trim()).filter(s => s);
-    }
-    
-    return servers;
-}
-
-// Auto-apply custom servers saat config generation
-function getCustomServersForConfig() {
-    const serversInput = document.getElementById('replacement-servers').value.trim();
-    return serversInput || '';
-}
-
-// Update replacement status badge
-function updateReplacementStatus(status) {
-    const statusBadge = document.getElementById('server-replace-status');
-    statusBadge.textContent = status;
-    statusBadge.className = 'badge badge-success';
-}
-
-// Advanced (Auto Fetch) helpers and handlers
-const ADV_API_PROVIDERS = [
-    'https://admin.ari-andika2.site/api/v2ray',
-    'https://aink.workerz.site/api/v2ray'
-];
-const ADV_SUPPORTED_TYPES = ['vless', 'vmess', 'trojan', 'ss'];
-
-function parseMultiInput(input) {
-    if (!input) return [];
-    return input
-        .split(/\n|,/)
-        .map(s => s.trim())
-        .filter(s => s.length > 0);
-}
-
-function getRandomElement(arr) {
-    return arr[Math.floor(Math.random() * arr.length)];
-}
-
-function getAdvancedSelections() {
-    const typeEls = Array.from(document.querySelectorAll('.adv-type'));
-    const selectedTypes = typeEls.filter(el => el.checked).map(el => el.value.trim());
-    const bugs = parseMultiInput(document.getElementById('adv-bugs')?.value || '');
-    const countriesRaw = parseMultiInput(document.getElementById('adv-countries')?.value || '');
-    const tls = (document.getElementById('adv-tls')?.value || 'true').toLowerCase();
-    const wildcard = (document.getElementById('adv-wildcard')?.value || 'false').toLowerCase();
-    let limit = parseInt(document.getElementById('adv-limit')?.value || '10', 10);
-    if (Number.isNaN(limit) || limit <= 0) limit = 10;
-
-    // Normalize countries (allow 'random' as-is, others to uppercase)
-    const countries = countriesRaw.map(c => c.toLowerCase() === 'random' ? 'random' : c.toUpperCase());
-
-    return { selectedTypes, bugs, countries, tls, wildcard, limit };
-}
-
-function buildAdvancedUrls() {
-    const { selectedTypes, bugs, countries, tls, wildcard, limit } = getAdvancedSelections();
-
-    const typesPool = selectedTypes.length > 0 ? selectedTypes : ADV_SUPPORTED_TYPES;
-    const countryPool = (countries.length > 0) ? countries : ['random'];
-    const bugPool = (bugs.length > 0) ? bugs : ['MASUKAN+BUG'];
-
-    const urls = [];
-    countryPool.forEach((country, idx) => {
-        const bug = bugPool[idx % bugPool.length];
-        typesPool.forEach((type) => {
-            const params = new URLSearchParams();
-            params.set('type', type);
-            params.set('bug', bug);
-            params.set('tls', tls);
-            params.set('wildcard', wildcard);
-            params.set('limit', String(limit));
-            if (country) params.set('country', country);
-            const base = getRandomElement(ADV_API_PROVIDERS);
-            urls.push(`${base}?${params.toString()}`);
-        });
-    });
-
-    // De-duplicate
-    return Array.from(new Set(urls));
-}
-
-function previewAdvancedUrls() {
-    try {
-        const urls = buildAdvancedUrls();
-        const infoEl = document.getElementById('adv-preview-info');
-        if (!infoEl) return;
-        if (urls.length === 0) {
-            infoEl.textContent = 'No preview: please fill Bugs and/or Countries';
-            showToast('Missing Parameters', 'Isi Bugs dan/atau Countries dulu', 'warning');
-            return;
-        }
-        const sample = urls.slice(0, 3).join('\n');
-        infoEl.textContent = `Generated ${urls.length} URLs. Example:\n${sample}${urls.length > 3 ? '\n…' : ''}`;
-        showToast('Preview Ready', `Generated ${urls.length} URLs`, 'success');
-    } catch (e) {
-        console.error('Advanced preview error:', e);
-        showToast('Preview Error', 'Failed to generate preview', 'error');
-    }
-}
-
-async function fetchAndAddAdvanced() {
-    try {
-        // Ensure configuration (template/GitHub) is loaded
-        const configResult = await loadConfigurationBasedOnSource();
-        if (!configResult.success) {
-            showToast('Setup Error', 'Failed to prepare configuration', 'error');
-            return;
-        }
-
-        const urls = buildAdvancedUrls();
-        if (urls.length === 0) {
-            showToast('No URLs', 'Please fill Bugs and/or Countries, then Preview', 'warning');
-            return;
-        }
-
-        // Populate Smart VPN Input for visibility and detection
-        const smartInput = document.getElementById('vpn-links');
-        if (smartInput) {
-            smartInput.value = urls.join('\n');
-            try { updateSmartDetectionPreview(smartInput.value); } catch (_) {}
-        }
-
-        updateStatus('Fetching advanced URLs…', 'info');
-        logActivity('Advanced: Fetch & Add started');
-
-        // Send URLs to backend as multiline text; backend will auto-fetch and extract
-        const response = await fetch('/api/add-links-and-test', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ links: urls.join('\n') })
-        });
-        const data = await response.json();
-
-        if (!data.success) {
-            showToast('Advanced Fetch Failed', data.message || 'Unknown error', 'error');
-            updateStatus('Advanced fetch failed - falling back to Smart Process', 'warning');
-            // Fallback: use Smart VPN Input flow automatically
-            await addLinksAndTest();
-            return;
-        }
-
-        // Update UI similar to addLinksAndTest flow
-        totalAccounts = data.total_accounts || totalAccounts;
-        const statsCard = document.getElementById('quick-stats');
-        if (statsCard) statsCard.style.display = 'block';
-        document.getElementById('vpn-links').value = '';
-        updateSmartDetectionPreview('');
-
-        if (Array.isArray(data.invalid_links) && data.invalid_links.length > 0) {
-            showToast('Some Invalid Links', `${data.invalid_links.length} links could not be parsed`, 'warning');
-        }
-
-        showToast('Success', data.message || 'Links added. Starting tests…', 'success');
-        logActivity(`Advanced: Added ${data.new_accounts || 0} accounts (total ${data.total_accounts || 0})`);
-        updateStatus('Starting tests…', 'success');
-
-        // Start testing
-        startTesting();
-    } catch (e) {
-        console.error('Advanced fetch error:', e);
-        showToast('Error', 'Failed to fetch and add advanced URLs', 'error');
-        updateStatus('Advanced fetch failed - falling back to Smart Process', 'warning');
-        // Fallback: use Smart VPN Input flow automatically
-        await addLinksAndTest();
-    }
-}
-
-// Add CSS for dynamic elements
-const dynamicStyles = document.createElement('style');
-dynamicStyles.textContent = `
-    .activity-entry {
-        display: flex;
-        justify-content: space-between;
-        padding: var(--space-sm);
-        border-bottom: 1px solid var(--border-primary);
-        font-size: var(--font-size-sm);
-    }
-    
-    .activity-time {
-        color: var(--text-muted);
-        font-size: var(--font-size-xs);
-    }
-    
-    .activity-message {
-        color: var(--text-secondary);
-    }
-    
-    .results-table {
-        display: flex;
-        flex-direction: column;
-    }
-    
-    .result-header,
-    .result-row {
-        display: grid;
-        grid-template-columns: auto 2fr 1fr 1fr 1.5fr;
-        gap: var(--space-sm);
-        padding: var(--space-sm) var(--space-md);
-        align-items: center;
-        border-bottom: 1px solid var(--border-primary);
-    }
-    
-    .result-header {
-        background: var(--bg-primary);
-        font-weight: 600;
-        font-size: var(--font-size-sm);
-        color: var(--text-primary);
-    }
-    
-    .result-row {
-        font-size: var(--font-size-sm);
-        color: var(--text-secondary);
-    }
-    
-    .result-row:hover {
-        background: var(--bg-primary);
-    }
-    
-    .status-message {
-        padding: var(--space-md);
-        border-radius: var(--radius-md);
-        border-left: 4px solid;
-    }
-    
-    .status-message.success {
-        background: rgba(16, 185, 129, 0.1);
-        border-color: var(--success);
-        color: var(--success);
-    }
-    
-    .status-message.error {
-        background: rgba(239, 68, 68, 0.1);
-        border-color: var(--error);
-        color: var(--error);
-    }
-    
-    @media (max-width: 768px) {
-        .result-header,
-        .result-row {
-            grid-template-columns: auto 1fr auto;
-        }
-        
-        .result-header div:nth-child(3),
-        .result-header div:nth-child(5),
-        .result-row div:nth-child(3),
-        .result-row div:nth-child(5) {
-            display: none;
-        }
-    }
-`;
-
-document.head.appendChild(dynamicStyles);
-
-function toggleTheme() {
-    const isLight = document.body.getAttribute('data-theme') === 'light';
-    const next = isLight ? '' : 'light';
-    if (next) document.body.setAttribute('data-theme', next); else document.body.removeAttribute('data-theme');
-    try { localStorage.setItem('theme', next || 'dark'); } catch (e) {}
-}
-
-// Attach toggle if button exists
-(function(){
-    const btn = document.getElementById('theme-toggle');
-    if (btn) btn.addEventListener('click', toggleTheme);
-})();
-
-// Wire FAB to Smart Process & Start Testing on mobile
-(function(){
-    const fab = document.getElementById('fab-start');
-    if (fab) {
-        fab.style.display = 'inline-flex';
-        fab.addEventListener('click', () => {
-            try { addLinksAndTest(); } catch (e) { console.warn('FAB smart process failed', e); }
-        });
-    }
-})();
