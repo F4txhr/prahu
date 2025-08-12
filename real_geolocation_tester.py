@@ -15,6 +15,7 @@ import urllib.request
 import platform
 import time
 import threading
+import socket
 
 def ensure_xray_available(dest_path: str | None = None) -> str | None:
     """Try to download Xray for current platform and chmod +x. Returns path if available."""
@@ -834,6 +835,11 @@ class RealGeolocationTester:
             self.xray_path = downloaded
         print(f"✅ XRAY will be used at: {self.xray_path}")
         
+        def pick_free_port() -> int:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('127.0.0.1', 0))
+                return s.getsockname()[1]
+
         def build_and_start(acc):
             cfg = self.create_xray_config(acc)
             if not cfg:
@@ -841,7 +847,12 @@ class RealGeolocationTester:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 json.dump(cfg, f)
                 tmp = f.name
-            proc = subprocess.Popen([self.xray_path, '-c', tmp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            # log Xray output ke file untuk debugging
+            logf = tempfile.NamedTemporaryFile(mode='wb', suffix='.log', delete=False)
+            log_path = logf.name
+            logf.close()
+            print(f"📝 XRAY log: {log_path}")
+            proc = subprocess.Popen([self.xray_path, '-c', tmp], stdout=open(log_path, 'ab'), stderr=open(log_path, 'ab'))
             return proc, tmp
         
         def stop_and_cleanup(proc, tmp):
@@ -856,6 +867,8 @@ class RealGeolocationTester:
         
         try:
             RealGeolocationTester._pool.acquire()
+            # gunakan inbound port acak yang bebas untuk menghindari bentrok
+            self.local_http_port = pick_free_port()
             proxy_arg = f"http://127.0.0.1:{self.local_http_port}"
             timeout = self.timeout_seconds
             
@@ -863,9 +876,9 @@ class RealGeolocationTester:
             xray_process, temp_config = build_and_start(account)
             if not xray_process:
                 return {'success': False, 'error': 'Config creation failed', 'method': 'proxy', 'reason': 'ConfigError'}
-            time.sleep(2)
-            head = subprocess.run(['curl', '-s', '-I', self.test_url, '--proxy', proxy_arg, '--connect-timeout', str(timeout)], capture_output=True, timeout=timeout+2)
-            connect_ok = (head.returncode == 0)
+            time.sleep(4)
+            head = subprocess.run(['curl', '-s', 'https://ipinfo.io/ip', '--proxy', proxy_arg, '--connect-timeout', str(timeout)], capture_output=True, text=True, timeout=timeout+2)
+            connect_ok = (head.returncode == 0 and head.stdout.strip() != '')
             
             # Attempt 2: retry with adjusted SNI/Host if head failed
             if not connect_ok:
@@ -887,9 +900,9 @@ class RealGeolocationTester:
                 xray_process, temp_config = build_and_start(alt)
                 if not xray_process:
                     return {'success': False, 'error': 'Config creation failed (alt)', 'method': 'proxy', 'reason': 'ConfigError'}
-                time.sleep(3)
-                head = subprocess.run(['curl', '-s', '-I', self.test_url, '--proxy', proxy_arg, '--connect-timeout', str(timeout)], capture_output=True, timeout=timeout+2)
-                connect_ok = (head.returncode == 0)
+                time.sleep(5)
+                head = subprocess.run(['curl', '-s', 'https://ipinfo.io/ip', '--proxy', proxy_arg, '--connect-timeout', str(timeout)], capture_output=True, text=True, timeout=timeout+2)
+                connect_ok = (head.returncode == 0 and head.stdout.strip() != '')
             
             # If still not ok, fail fast
             if not connect_ok:
@@ -898,6 +911,8 @@ class RealGeolocationTester:
             
             # Collect geo from multiple endpoints via proxy
             start_time = time.monotonic()
+            # first ping ipinfo to set baseline
+            _ = subprocess.run(['curl', '-s', 'https://ipinfo.io/ip', '--proxy', proxy_arg, '--connect-timeout', str(timeout)], capture_output=True, text=True, timeout=timeout+2)
             end_time = time.monotonic()
             latency_ms = (end_time - start_time) * 1000
             votes = []
