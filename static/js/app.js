@@ -200,10 +200,128 @@ function ensureGlobalSkeleton(pending) {
   }
 }
 
+function cleanTag(tag) {
+  const s = (tag||'').toString();
+  // Hilangkan emoji bendera dan kode negara (2 huruf) di awal/akhir
+  const withoutFlag = s.replace(/[\uD83C][\uDFFB-\uDFFF]?|\p{Extended_Pictographic}/gu, '');
+  const withoutCode = withoutFlag.replace(/^\s*\(?[A-Z]{2}\)?\s*[-|–]?\s*/i, '').replace(/\s*[-|–]?\s*\(?[A-Z]{2}\)?\s*$/i, '');
+  return withoutCode.trim().replace(/\s{2,}/g,' ');
+}
+function truncate(str, max){ const s=(str||'').toString(); return s.length>max ? s.slice(0,max-1)+'…' : s; }
+
+function renderMainRow(r){
+  const status = normalizeStatus(r.Status);
+  const tag = cleanTag(r.OriginalTag || r.tag || '');
+  const isp = (r.Provider || '-').toString().replace(/\(.*?\)/g,'').replace(/,+/g, ',').trim();
+  const ip = r['Tested IP'] || r.server || '-';
+  return `
+    <td title="${escapeHtml(tag)}">${escapeHtml(truncate(tag,24))}</td>
+    <td>${escapeHtml((r.VpnType||r.type||'').toLowerCase())}</td>
+    <td title="${escapeHtml(isp)}">${escapeHtml(truncate(isp,22))}</td>
+    <td title="${escapeHtml(ip)}"><code>${escapeHtml(truncate(ip,18))}</code></td>
+    <td>${fmtLatency(r.Latency)}</td>
+    <td class="${statusClass(status)}" title="${escapeHtml(r.Reason||'')}">${status==='✅'?'Live':'Dead'}</td>`;
+}
+
+function renderFloatRow(r){
+  const status = normalizeStatus(r.Status);
+  const tag = cleanTag(r.OriginalTag || r.tag || '');
+  const isp = (r.Provider || '-').toString().replace(/\(.*?\)/g,'').replace(/,+/g, ',').trim();
+  const ip = r['Tested IP'] || r.server || '-';
+  const ping = (r.ICMP==='✔') ? 'OK' : (r.ICMP||'-');
+  const transport = (r.TestType||'').split(' ').slice(-1)[0] || '-';
+  const phase = r.XRAY ? 'P2' : (isFinalStatus(r.Status)?'P1':'–');
+  return `
+    <td title="${escapeHtml(tag)}">${escapeHtml(truncate(tag,24))}</td>
+    <td>${escapeHtml((r.VpnType||r.type||'').toLowerCase())}</td>
+    <td title="${escapeHtml(isp)}">${escapeHtml(truncate(isp,22))}</td>
+    <td>${escapeHtml(r.Country||'❓')}</td>
+    <td title="${escapeHtml(ip)}"><code>${escapeHtml(truncate(ip,18))}</code></td>
+    <td>${fmtLatency(r.Latency)}</td>
+    <td title="${escapeHtml(r.ICMP||'')}">${escapeHtml(ping)}</td>
+    <td class="${statusClass(status)}" title="${escapeHtml(r.Reason||'')}">${status}</td>
+    <td>${escapeHtml(transport)}</td>
+    <td>${phase}</td>`;
+}
+
 function rerenderTableInCompletionOrder(totalHint) {
   const tbody = $('#results-body'); if (!tbody) return;
+  const frag = document.createDocumentFragment();
+  for (const idx of displayOrder) {
+    const r = latestByIndex.get(idx); if (!r) continue;
+    let tr = rowMap.get(idx);
+    if (!tr) { tr = document.createElement('tr'); tr.id = `row-${idx}`; rowMap.set(idx, tr); }
+    tr.innerHTML = renderMainRow(r);
+    frag.appendChild(tr);
+  }
+  // Append or remove skeleton
   const pending = Number.isFinite(totalHint) ? (displayOrder.length < totalHint) : false;
-  ensureGlobalSkeleton(pending);
+  if (pending) {
+    if (!skeletonEl) {
+      skeletonEl = document.createElement('tr');
+      skeletonEl.id = 'skel-global';
+      skeletonEl.className = 'skel-row';
+      skeletonEl.innerHTML = `
+        <td><span class="skeleton-line lg"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line md"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line sm"></span></td>
+        <td><span class="skeleton-line md"></span></td>`;
+    }
+    frag.appendChild(skeletonEl);
+  } else if (skeletonEl) { skeletonEl.remove(); skeletonEl = null; }
+
+  tbody.innerHTML = '';
+  tbody.appendChild(frag);
+
+  // Rerender floating panel if visible
+  const panel = $('#floating-panel');
+  if (panel && !panel.classList.contains('hidden')) rerenderFloatingTable();
+}
+
+function rerenderFloatingTable() {
+  const tbody = $('#float-body'); if (!tbody) return;
+  const frag = document.createDocumentFragment();
+  for (const idx of displayOrder) {
+    const r = latestByIndex.get(idx); if (!r) continue;
+    const tr = document.createElement('tr');
+    tr.innerHTML = renderFloatRow(r);
+    frag.appendChild(tr);
+  }
+  // Floating skeleton if pending
+  const pending = displayOrder.length < plannedTotal;
+  if (pending) {
+    const sk = document.createElement('tr');
+    sk.className = 'skel-row';
+    sk.innerHTML = `
+      <td><span class="skeleton-line lg"></span></td>
+      <td><span class="skeleton-line sm"></span></td>
+      <td><span class="skeleton-line md"></span></td>
+      <td><span class="skeleton-line sm"></span></td>
+      <td><span class="skeleton-line sm"></span></td>
+      <td><span class="skeleton-line md"></span></td>
+      <td><span class="skeleton-line sm"></span></td>
+      <td><span class="skeleton-line md"></span></td>
+      <td><span class="skeleton-line sm"></span></td>
+      <td><span class="skeleton-line sm"></span></td>`;
+    frag.appendChild(sk);
+  }
+  tbody.innerHTML = '';
+  tbody.appendChild(frag);
+}
+
+function toggleFloatingPanel(show){
+  const panel = $('#floating-panel'); if (!panel) return;
+  if (typeof show === 'boolean') panel.classList.toggle('hidden', !show);
+  else panel.classList.toggle('hidden');
+  if (!panel.classList.contains('hidden')) rerenderFloatingTable();
+}
+
+// Bind toggle buttons
+function bindFloatingControls(){
+  const btn = $('#btn-toggle-float'); if (btn) btn.addEventListener('click', ()=> toggleFloatingPanel());
+  const close = $('#btn-close-float'); if (close) close.addEventListener('click', ()=> toggleFloatingPanel(false));
 }
 
 // Socket
@@ -411,6 +529,7 @@ function bindEvents(){
   console.debug('[UI] bindEvents');
   bindInfoTips();
   bindRipple();
+  bindFloatingControls();
   $all('input[name="config-source"]').forEach(r=>r.addEventListener('change', () => { console.debug('[UI] source change'); switchSourceUI(); }));
   const b1=$('#btn-load-config'); if (b1) b1.addEventListener('click', () => { toast('Loading config…','info'); console.debug('[Action] loadConfig'); loadConfig(); });
   const b2=$('#btn-save-gh'); if (b2) b2.addEventListener('click', () => { toast('Saving GitHub…','info'); console.debug('[Action] saveGitHub'); loadConfig(); });

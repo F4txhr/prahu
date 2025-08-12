@@ -107,6 +107,7 @@
         <div class="card">
           <div class="card-header">
             <h2 class="card-title">Live Testing <button class="info-btn" data-info="Progres pengujian akun secara real‑time.">!</button></h2>
+            <button id="btn-toggle-float" class="btn btn-soft text-xs px-3 py-1">More</button>
           </div>
           <div class="card-body space-y-4">
             <div>
@@ -122,9 +123,9 @@
                   <tr>
                     <th>Tag</th>
                     <th>Type</th>
+                    <th>ISP</th>
                     <th>IP</th>
                     <th>Latency</th>
-                    <th>Country</th>
                     <th>Status</th>
                   </tr>
                 </thead>
@@ -177,5 +178,38 @@
   <!-- Socket.IO client + app logic -->
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+  <!-- Floating panel for detailed table -->
+  <div id="floating-panel" class="fixed bottom-4 right-4 z-40 w-[92vw] md:w-[640px] hidden">
+    <div class="card shadow-xl">
+      <div class="card-header">
+        <h3 class="card-title">Details <button class="info-btn" data-info="Tabel detail: kolom tambahan seperti Country, Ping, Transport, dsb.">!</button></h3>
+        <button id="btn-close-float" class="btn btn-soft text-xs px-3 py-1">Close</button>
+      </div>
+      <div class="card-body space-y-3">
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>Tag</th>
+                <th>Type</th>
+                <th>ISP</th>
+                <th>Country</th>
+                <th>IP</th>
+                <th>Latency</th>
+                <th>Ping</th>
+                <th>Status</th>
+                <th>Transport</th>
+                <th>Phase</th>
+              </tr>
+            </thead>
+            <tbody id="float-body">
+              <!-- Rows & skeleton injected by JS -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
