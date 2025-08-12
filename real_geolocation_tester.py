@@ -832,109 +832,130 @@ class RealGeolocationTester:
             self.xray_path = downloaded
         print(f"✅ XRAY will be used at: {self.xray_path}")
         
-        try:
-            # limit concurrency
-            RealGeolocationTester._pool.acquire()
-            # Create Xray config
-            config = self.create_xray_config(account)
-            if not config:
-                return {'success': False, 'error': 'Config creation failed', 'method': 'proxy', 'reason': 'ConfigError'}
-            
-            # Write temp config
+        def build_and_start(acc):
+            cfg = self.create_xray_config(acc)
+            if not cfg:
+                return None, None
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
-                json.dump(config, f)
-                temp_config = f.name
-            
+                json.dump(cfg, f)
+                tmp = f.name
+            proc = subprocess.Popen([self.xray_path, '-c', tmp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return proc, tmp
+        
+        def stop_and_cleanup(proc, tmp):
             try:
-                # Start Xray process
-                xray_process = subprocess.Popen(
-                    [self.xray_path, '-c', temp_config],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL
-                )
-                time.sleep(2)  # Wait for startup
-                
-                # Test connection
-                proxy_arg = f"http://127.0.0.1:{self.local_http_port}"
-                start_time = time.monotonic()
-                head = subprocess.run(
-                    ['curl', '-s', '-I', self.test_url, '--proxy', proxy_arg,
-                     '--connect-timeout', str(self.timeout_seconds)],
-                    capture_output=True, timeout=self.timeout_seconds + 2
-                )
-                connect_ok = head.returncode == 0
-                end_time = time.monotonic()
-                latency_ms = (end_time - start_time) * 1000
-
-                # Collect geo from multiple endpoints
-                votes = []
-                ip_seen = None
-                for name, url in self.geo_endpoints:
-                    try:
-                        res = subprocess.run(
-                            ['curl', '-s', url, '--proxy', proxy_arg],
-                            capture_output=True, text=True, timeout=10
-                        )
-                        if res.returncode != 0:
-                            continue
-                        if name == 'cf-trace':
-                            # Parse key=value lines
-                            data = {}
-                            for line in res.stdout.splitlines():
-                                if '=' in line:
-                                    k, v = line.split('=', 1)
-                                    data[k.strip()] = v.strip()
-                            ip = data.get('ip')
-                            colo = data.get('colo')
-                            if ip:
-                                votes.append({'ip': ip, 'provider': data.get('loc', ''), 'country': data.get('loc', '')})
-                                ip_seen = ip_seen or ip
-                        else:
-                            data = json.loads(res.stdout)
-                            if name == 'ip-api':
-                                votes.append({'ip': data.get('query'), 'provider': data.get('org') or data.get('isp'), 'country': data.get('countryCode')})
-                                ip_seen = ip_seen or data.get('query')
-                            elif name == 'ipinfo':
-                                votes.append({'ip': data.get('ip'), 'provider': data.get('org'), 'country': (data.get('country') or '').upper()})
-                                ip_seen = ip_seen or data.get('ip')
-                    except Exception:
-                        continue
-
-                def majority(key):
-                    from collections import Counter
-                    vals = [v.get(key) for v in votes if v.get(key)]
-                    return Counter(vals).most_common(1)[0][0] if vals else None
-
-                country = majority('country') or 'N/A'
-                provider = majority('provider') or 'N/A'
-                ip_final = majority('ip') or ip_seen or 'N/A'
-
-                if connect_ok and ip_final != 'N/A':
-                    return {
-                        'success': True,
-                        'country': country,
-                        'country_name': country,
-                        'isp': provider,
-                        'org': provider,
-                        'ip': ip_final,
-                        'method': 'VPN Proxy',
-                        'latency': latency_ms
-                    }
-                else:
-                    return {'success': False, 'error': 'ProxyConnectFail' if not connect_ok else 'GeoResolveFail', 'method': 'proxy'}
-
-            finally:
-                # Cleanup
-                if 'xray_process' in locals():
-                    xray_process.kill()
-                os.unlink(temp_config)
+                if proc: proc.kill()
+            except Exception:
+                pass
+            try:
+                if tmp and os.path.exists(tmp): os.unlink(tmp)
+            except Exception:
+                pass
+        
+        try:
+            RealGeolocationTester._pool.acquire()
+            proxy_arg = f"http://127.0.0.1:{self.local_http_port}"
+            timeout = self.timeout_seconds
+            
+            # Attempt 1: use account as-is (with our SNI/Host fallbacks in builder)
+            xray_process, temp_config = build_and_start(account)
+            if not xray_process:
+                return {'success': False, 'error': 'Config creation failed', 'method': 'proxy', 'reason': 'ConfigError'}
+            time.sleep(2)
+            head = subprocess.run(['curl', '-s', '-I', self.test_url, '--proxy', proxy_arg, '--connect-timeout', str(timeout)], capture_output=True, timeout=timeout+2)
+            connect_ok = (head.returncode == 0)
+            
+            # Attempt 2: retry with adjusted SNI/Host if head failed
+            if not connect_ok:
+                stop_and_cleanup(xray_process, temp_config)
+                # Build alt account: prefer Host header for SNI; if missing, use server
+                alt = json.loads(json.dumps(account))
+                tls = alt.get('tls', {}) if isinstance(alt.get('tls'), dict) else {}
+                transport = alt.get('transport', {}) if isinstance(alt.get('transport'), dict) else {}
+                headers = transport.get('headers', {}) if isinstance(transport.get('headers'), dict) else {}
+                host_hdr = headers.get('Host') or alt.get('server', '')
+                if isinstance(tls, dict):
+                    tls['sni'] = tls.get('sni') or tls.get('server_name') or host_hdr
+                    tls['server_name'] = tls.get('server_name') or tls.get('sni')
+                    alt['tls'] = tls
+                if isinstance(transport, dict):
+                    if 'headers' in transport and isinstance(transport['headers'], dict):
+                        transport['headers']['Host'] = transport['headers'].get('Host') or host_hdr
+                    alt['transport'] = transport
+                xray_process, temp_config = build_and_start(alt)
+                if not xray_process:
+                    return {'success': False, 'error': 'Config creation failed (alt)', 'method': 'proxy', 'reason': 'ConfigError'}
+                time.sleep(3)
+                head = subprocess.run(['curl', '-s', '-I', self.test_url, '--proxy', proxy_arg, '--connect-timeout', str(timeout)], capture_output=True, timeout=timeout+2)
+                connect_ok = (head.returncode == 0)
+            
+            # If still not ok, fail fast
+            if not connect_ok:
+                stop_and_cleanup(xray_process, temp_config)
+                return {'success': False, 'error': 'ProxyConnectFail', 'method': 'proxy'}
+            
+            # Collect geo from multiple endpoints via proxy
+            start_time = time.monotonic()
+            end_time = time.monotonic()
+            latency_ms = (end_time - start_time) * 1000
+            votes = []
+            ip_seen = None
+            for name, url in self.geo_endpoints:
                 try:
-                    RealGeolocationTester._pool.release()
+                    res = subprocess.run(['curl', '-s', url, '--proxy', proxy_arg], capture_output=True, text=True, timeout=10)
+                    if res.returncode != 0:
+                        continue
+                    if name == 'cf-trace':
+                        data = {}
+                        for line in res.stdout.splitlines():
+                            if '=' in line:
+                                k, v = line.split('=', 1)
+                                data[k.strip()] = v.strip()
+                        ip = data.get('ip')
+                        if ip:
+                            votes.append({'ip': ip, 'provider': data.get('loc', ''), 'country': data.get('loc', '')})
+                            ip_seen = ip_seen or ip
+                    else:
+                        data = json.loads(res.stdout)
+                        if name == 'ip-api':
+                            votes.append({'ip': data.get('query'), 'provider': data.get('org') or data.get('isp'), 'country': data.get('countryCode')})
+                            ip_seen = ip_seen or data.get('query')
+                        elif name == 'ipinfo':
+                            votes.append({'ip': data.get('ip'), 'provider': data.get('org'), 'country': (data.get('country') or '').upper()})
+                            ip_seen = ip_seen or data.get('ip')
                 except Exception:
-                    pass
-         
+                    continue
+            
+            from collections import Counter
+            def majority(key):
+                vals = [v.get(key) for v in votes if v.get(key)]
+                return Counter(vals).most_common(1)[0][0] if vals else None
+            country = majority('country') or 'N/A'
+            provider = majority('provider') or 'N/A'
+            ip_final = majority('ip') or ip_seen or 'N/A'
+            
+            stop_and_cleanup(xray_process, temp_config)
+            
+            if ip_final != 'N/A':
+                return {
+                    'success': True,
+                    'country': country,
+                    'country_name': country,
+                    'isp': provider,
+                    'org': provider,
+                    'ip': ip_final,
+                    'method': 'VPN Proxy',
+                    'latency': latency_ms
+                }
+            else:
+                return {'success': False, 'error': 'GeoResolveFail', 'method': 'proxy'}
         except Exception as e:
             return {'success': False, 'error': str(e), 'method': 'proxy'}
+        finally:
+            try:
+                RealGeolocationTester._pool.release()
+            except Exception:
+                pass
          
         return {'success': False, 'error': 'Connection failed', 'method': 'proxy'}
 
