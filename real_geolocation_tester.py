@@ -228,51 +228,44 @@ class RealGeolocationTester:
         USER'S IMPROVED METHOD: Create Xray config dengan proper VLESS/VMess handling
         Based on working standalone script
         """
-        protocol = account.get('type', '')
-        
-        # Mapping protocol names untuk Xray
-        protocol_name = 'shadowsocks' if protocol == 'ss' else protocol
-        outbound = {"protocol": protocol_name}
+        protocol_name = account.get('type', '').lower()
+        outbound = {
+            "protocol": protocol_name,
+            "settings": {},
+            "streamSettings": {
+                "network": "tcp",
+                "security": "none"
+            }
+        }
         
         # --- STREAM SETTINGS (Handle transport & TLS first) ---
         transport = account.get('transport', {})
         tls_config = account.get('tls', {})
         
-        if transport.get('type') != 'tcp' or tls_config.get('enabled'):
-            stream_settings = {}
-            
-            # Network type
-            network_type = transport.get('type', 'tcp')
-            if network_type != 'tcp':
-                stream_settings["network"] = network_type
-            
-            # TLS settings
-            if tls_config.get('enabled') or account.get('security') == 'tls':
-                stream_settings['security'] = 'tls'
-                sni = tls_config.get('sni') or tls_config.get('server_name', account.get('server', ''))
-                stream_settings['tlsSettings'] = {"serverName": sni}
-                
-                # ALPN support (user's improvement)
-                alpn = account.get('alpn')
-                if alpn:
-                    stream_settings['tlsSettings']["alpn"] = [alpn]
-            
-            # WebSocket settings
-            if network_type == 'ws':
-                ws_settings = {
-                    "path": transport.get('path', '/'),
-                    "headers": transport.get('headers', {})
-                }
-                stream_settings['wsSettings'] = ws_settings
-            
-            # gRPC settings
-            elif network_type == 'grpc':
-                stream_settings['grpcSettings'] = {
-                    "serviceName": transport.get('serviceName', account.get('serviceName', ''))
-                }
-            
-            if stream_settings:
-                outbound['streamSettings'] = stream_settings
+        # Determine network type
+        network_type = transport.get('type') or account.get('network') or 'tcp'
+        outbound['streamSettings']['network'] = network_type
+        
+        # TLS settings
+        tls_enabled = bool(tls_config.get('enabled') or account.get('security') == 'tls')
+        if tls_enabled:
+            outbound['streamSettings']['security'] = 'tls'
+            # Fallback order: tls.sni -> tls.server_name -> transport.headers.Host -> server
+            headers = transport.get('headers', {}) if isinstance(transport, dict) else {}
+            host_hdr = headers.get('Host') if isinstance(headers, dict) else None
+            sni = tls_config.get('sni') or tls_config.get('server_name') or host_hdr or account.get('server', '')
+            outbound['streamSettings']['tlsSettings'] = {"serverName": sni}
+        
+        # WS settings
+        if network_type == 'ws':
+            ws_settings = {
+                "path": transport.get('path', '/') if isinstance(transport, dict) else '/',
+                "headers": transport.get('headers', {}) if isinstance(transport, dict) else {}
+            }
+            # Ensure Host header present for WS if possible
+            if tls_enabled and not ws_settings["headers"].get('Host'):
+                ws_settings["headers"]['Host'] = tls_config.get('sni') or tls_config.get('server_name') or account.get('server', '')
+            outbound['streamSettings']['wsSettings'] = ws_settings
         
         # --- PROTOCOL SETTINGS (User's improved approach) ---
         if protocol_name == 'vless':
@@ -280,11 +273,9 @@ class RealGeolocationTester:
                 "uuid": account.get('uuid', account.get('user_id', '')),
                 "encryption": account.get('encryption', 'none') or 'none'
             }
-            # Flow support untuk VLESS (user's improvement)
             flow = account.get('flow')
             if flow:
                 user_config["flow"] = flow
-                
             outbound['settings'] = {
                 "vnext": [{
                     "address": account.get('server', ''),
@@ -292,20 +283,16 @@ class RealGeolocationTester:
                     "users": [user_config]
                 }]
             }
-            
         elif protocol_name == 'vmess':
             user_config = {
                 "id": account.get('uuid', account.get('user_id', ''))
             }
-            # VMess specific settings (user's improvement)
             alter_id = account.get('alter_id', account.get('alterId'))
             if alter_id is not None:
                 user_config["alterId"] = int(alter_id)
-            
             encryption = account.get('encryption')
             if encryption:
                 user_config["encryption"] = encryption
-                
             outbound['settings'] = {
                 "vnext": [{
                     "address": account.get('server', ''),
@@ -313,35 +300,31 @@ class RealGeolocationTester:
                     "users": [user_config]
                 }]
             }
-            
         elif protocol_name == 'trojan':
             server_config = {
                 "address": account.get('server', ''),
                 "port": int(account.get('server_port', 443)),
-                "password": account.get('password', account.get('user_id', ''))
+                "password": account.get('password', account.get('uuid', ''))
             }
-            # Flow support untuk Trojan (user's improvement)
             flow = account.get('flow')
             if flow:
                 server_config["flow"] = flow
-                
             outbound['settings'] = {
                 "servers": [server_config]
             }
-            
         elif protocol_name == 'shadowsocks':
             server_config = {
                 "address": account.get('server', ''),
                 "port": int(account.get('server_port', 443)),
-                "method": account.get('method', 'aes-256-gcm'),
+                "method": account.get('method', ''),
                 "password": account.get('password', '')
             }
             outbound['settings'] = {
                 "servers": [server_config]
             }
         else:
-            print(f"❌ Unsupported protocol: {protocol}")
-            return None
+            # Unknown protocol; let Xray handle basic fields
+            outbound['settings'] = {}
         
         return {
             "log": {"loglevel": "warning"},
