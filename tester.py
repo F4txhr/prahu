@@ -251,6 +251,9 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         break
 
                     geo_info = geoip_lookup(test_ip)
+                    # If front ISP is CDN, mark it explicitly and do not treat as 'real'
+                    provider = (geo_info.get('Provider') or '-').strip()
+                    is_cdn = provider.lower() in ("cloudflare, inc.", "cloudflare", "akamai", "fastly")
                     result.update({
                         "Status": "✅",
                         "TestType": f"{source_label.upper()} {'WS' if is_ws else 'TCP'}",
@@ -258,17 +261,20 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         "Latency": latency,
                         "Jitter": 0,
                         "ICMP": "✔",
-                        **geo_info
+                        "Provider": ("CDN (front)" if is_cdn else provider),
+                        "Country": geo_info.get('Country', '❓')
                     })
                     print(f"✅ NON-XRAY success: {vpn_type} {test_ip}:{test_port} ({result['TestType']})")
                     try:
                         if USE_XRAY:
                             from real_geolocation_tester import get_real_geolocation
                             real_geo = get_real_geolocation(account)
-                            if real_geo:
+                            if real_geo and real_geo.get('Provider') and str(real_geo.get('Provider','')).lower() not in ('cloudflare, inc.', 'cloudflare'):
                                 result.update(real_geo)
                                 result['XRAY'] = True
                                 print(f"✅ XRAY success: {vpn_type} egress {real_geo.get('Tested IP','-')} {real_geo.get('Provider','-')}")
+                            else:
+                                print("⚠️ XRAY egress behind CDN or unavailable; keeping front ISP")
                     except ImportError:
                         pass
                     if live_results is not None:
