@@ -367,12 +367,27 @@ def handle_start_testing(payload=None):
     if mode:
         print(f"🧭 Testing mode: {mode}{' (Top‑N='+str(top_n)+')' if (mode=='hybrid' and top_n) else ''}")
     print(f"🔍 DEBUG: start_testing received, accounts count: {len(session_data['all_accounts'])}")
-    
+
+    # PRE-FLIGHT: ensure required tools (XRAY) available
+    try:
+        from real_geolocation_tester import ensure_xray_available
+        xray_path = ensure_xray_available()
+        if xray_path:
+            # give a short delay to ensure binary is ready on slow FS
+            import time
+            time.sleep(1.0)
+            os.environ['XRAY_PATH'] = xray_path
+            print(f"✅ Preflight: XRAY ready at {xray_path}")
+        else:
+            print("⚠️ Preflight: XRAY not available; egress ISP may be unavailable")
+    except Exception as e:
+        print(f"⚠️ Preflight error: {e}")
+
     if not session_data['all_accounts']:
         print("❌ DEBUG: No accounts found in session_data")
         emit('testing_error', {'message': 'No accounts to test'})
         return
-    
+
     print("✅ DEBUG: Starting testing process in backend...")
     
     def run_tests():
