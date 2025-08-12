@@ -659,17 +659,19 @@ class RealGeolocationTester:
             print(f"   Original Host: {original_host}")
             print(f"   Cleaned target: {cleaned_target}")
             
-            # Update TLS SNI untuk testing dengan cleaned domain
-            if 'tls' in modified_account:
-                if 'sni' in modified_account['tls']:
-                    modified_account['tls']['sni'] = cleaned_target
-                if 'server_name' in modified_account['tls']:
-                    modified_account['tls']['server_name'] = cleaned_target
+            # Update TLS SNI untuk testing dengan cleaned domain (set selalu)
+            if 'tls' not in modified_account or not isinstance(modified_account['tls'], dict):
+                modified_account['tls'] = {}
+            modified_account['tls']['enabled'] = True
+            modified_account['tls']['sni'] = cleaned_target
+            modified_account['tls']['server_name'] = cleaned_target
             
-            # Update transport Host untuk testing dengan cleaned domain
-            if 'transport' in modified_account and 'headers' in modified_account['transport']:
-                if 'Host' in modified_account['transport']['headers']:
-                    modified_account['transport']['headers']['Host'] = cleaned_target
+            # Update transport Host untuk testing dengan cleaned domain (set selalu)
+            if 'transport' not in modified_account or not isinstance(modified_account['transport'], dict):
+                modified_account['transport'] = {}
+            if 'headers' not in modified_account['transport'] or not isinstance(modified_account['transport']['headers'], dict):
+                modified_account['transport']['headers'] = {}
+            modified_account['transport']['headers']['Host'] = cleaned_target
             
             print(f"   ✅ Modified untuk testing - SNI: {modified_account.get('tls', {}).get('sni')}, Host: {modified_account.get('transport', {}).get('headers', {}).get('Host')}")
         else:
