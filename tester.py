@@ -143,14 +143,43 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
         "OriginalAccount": account, "TestType": "N/A", "Retry": 0, "TimeoutCount": 0
     }
 
+    tried_xray = False
+
     async with semaphore:
-        # === LOGIKA BARU ===
+        # === XRAY FIRST: primary method to obtain real egress ISP ===
+        try:
+            tried_xray = True
+            from real_geolocation_tester import get_real_geolocation
+            real_geo = get_real_geolocation(account)
+            if real_geo and str(real_geo.get('Provider', '')).lower() not in ("cloudflare, inc.", "cloudflare"):
+                result.update({
+                    "Status": "✅",
+                    "TestType": "XRAY",
+                    "Tested IP": real_geo.get('Tested IP', '-'),
+                    "Latency": real_geo.get('Latency', 0),
+                    "Jitter": real_geo.get('Jitter', 0),
+                    "ICMP": "✔",
+                    "Country": real_geo.get('Country', '❓'),
+                    "Provider": real_geo.get('Provider', '-')
+                })
+                print(f"✅ XRAY primary success: {vpn_type} egress {result['Tested IP']} {result['Provider']}")
+                if live_results is not None:
+                    live_results[index].update(result)
+                    await asyncio.sleep(0)
+                return result
+            else:
+                print("⚠️ XRAY primary failed or behind CDN; will fallback to Non‑XRAY")
+        except ImportError:
+            print("⚠️ XRAY module not available; fallback to Non‑XRAY")
+        except Exception as e:
+            print(f"⚠️ XRAY primary error: {e}; fallback to Non‑XRAY")
+
+        # === EXISTING NON‑XRAY LOGIC (fallback) ===
         targets = get_test_targets(account)
         if not targets:
             result['Status'] = '❌'
             return result
-
-        # USER REQUEST: Retry timeout 3x per target, then try next target; if all fail, mark dead
+        
         timeout_retries = 3
         for (test_ip, test_port, source_label, sni_for_tls) in targets:
             result['TimeoutCount'] = 0
@@ -166,7 +195,6 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
 
                 is_conn, latency = is_alive(test_ip, test_port, timeout=5)
                 if is_conn:
-                    # Optional TLS check if TLS enabled
                     tls_cfg = account.get('tls', {}) if isinstance(account.get('tls'), dict) else {}
                     tls_enabled = bool(tls_cfg.get('enabled'))
                     tls_ok = True
@@ -175,18 +203,14 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                             context = ssl.create_default_context()
                             with socket.create_connection((test_ip, test_port), timeout=5) as raw_sock:
                                 with context.wrap_socket(raw_sock, server_hostname=sni_for_tls) as tls_sock:
-                                    # Handshake happens on wrap
                                     tls_ok = True
                         except Exception as e:
                             tls_ok = False
                             result['Reason'] = 'TLSFail'
                     if tls_enabled and not tls_ok:
-                        # Mark as TLSFail and try next target
                         print(f"TLSFail for {sni_for_tls}@{test_ip}:{test_port}")
-                        # try next domain target
                         break
 
-                    # WS probe if needed
                     ws_ok = True
                     transport = account.get('transport', {}) if isinstance(account.get('transport'), dict) else {}
                     is_ws = (transport.get('type') == 'ws')
@@ -194,7 +218,6 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         headers = transport.get('headers', {}) if isinstance(transport.get('headers'), dict) else {}
                         host_header = headers.get('Host') or sni_for_tls
                         path = transport.get('path') or '/'
-                        # Only attempt WS probe if we have a hostname for SNI/Host
                         if tls_enabled and host_header:
                             try:
                                 raw = socket.create_connection((test_ip, test_port), timeout=5)
@@ -242,16 +265,13 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                             except Exception:
                                 ws_ok = False
                         else:
-                            # No host header/SNI: skip WS probe to avoid false negative
                             ws_ok = True
                     if is_ws and not ws_ok:
                         result['Reason'] = 'WSFail'
                         print(f"WSFail for {host_header or sni_for_tls}@{test_ip}:{test_port}")
-                        # try next target instead of failing total
                         break
 
                     geo_info = geoip_lookup(test_ip)
-                    # If front ISP is CDN, mark it explicitly and do not treat as 'real'
                     provider = (geo_info.get('Provider') or '-').strip()
                     is_cdn = provider.lower() in ("cloudflare, inc.", "cloudflare", "akamai", "fastly")
                     result.update({
@@ -265,18 +285,7 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         "Country": geo_info.get('Country', '❓')
                     })
                     print(f"✅ NON-XRAY success: {vpn_type} {test_ip}:{test_port} ({result['TestType']})")
-                    try:
-                        if USE_XRAY:
-                            from real_geolocation_tester import get_real_geolocation
-                            real_geo = get_real_geolocation(account)
-                            if real_geo and real_geo.get('Provider') and str(real_geo.get('Provider','')).lower() not in ('cloudflare, inc.', 'cloudflare'):
-                                result.update(real_geo)
-                                result['XRAY'] = True
-                                print(f"✅ XRAY success: {vpn_type} egress {real_geo.get('Tested IP','-')} {real_geo.get('Provider','-')}")
-                            else:
-                                print("⚠️ XRAY egress behind CDN or unavailable; keeping front ISP")
-                    except ImportError:
-                        pass
+                    # DO NOT attempt XRAY again (primary already attempted)
                     if live_results is not None:
                         live_results[index].update(result)
                     return result
@@ -284,7 +293,6 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                     result['TimeoutCount'] += 1
                 if result['TimeoutCount'] >= timeout_retries:
                     break
-                # small delay before retry
                 if attempt < MAX_RETRIES - 1:
                     result['Status'] = '🔁'
                     if live_results is not None:
@@ -292,51 +300,39 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         await asyncio.sleep(0)
                     await asyncio.sleep(RETRY_DELAY)
 
-        # Fallback ping jika TCP gagal untuk semua target
-        # Pilih IP pertama dari targets untuk ping fallback
-        fallback_ip = targets[0][0]
-        for attempt in range(MAX_RETRIES):
-            result['Status'] = '🔄'
-            result['Retry'] = attempt
-            if live_results is not None:
-                live_results[index].update(result)
-                await asyncio.sleep(0)
-
-            stats = get_network_stats(fallback_ip)
-            if stats.get("Latency") != -1:
-                geo_info = geoip_lookup(fallback_ip)
-                result.update({
-                    "Status": "✅",
-                    "TestType": f"{targets[0][2].upper()} Ping",
-                    "Tested IP": fallback_ip,
-                    **stats,
-                    **geo_info
-                })
-                try:
-                    from real_geolocation_tester import get_real_geolocation
-                    real_geo = get_real_geolocation(account)
-                    if real_geo:
-                        result.update(real_geo)
-                except ImportError:
-                    pass
-                if live_results is not None:
-                    live_results[index].update(result)
-                return result
-
-            if attempt < MAX_RETRIES - 1:
-                result['Status'] = '🔁'
-                result['Retry'] = attempt + 1
+        # Fallback ping jika TCP gagal
+        if targets:
+            fallback_ip = targets[0][0]
+            for attempt in range(MAX_RETRIES):
+                result['Status'] = '🔄'
+                result['Retry'] = attempt
                 if live_results is not None:
                     live_results[index].update(result)
                     await asyncio.sleep(0)
-                await asyncio.sleep(RETRY_DELAY)
 
-        # Semua cara sudah dicoba, masih gagal
+                stats = get_network_stats(fallback_ip)
+                if stats.get("Latency") != -1:
+                    geo_info = geoip_lookup(fallback_ip)
+                    result.update({
+                        "Status": "✅",
+                        "TestType": f"{targets[0][2].upper()} Ping",
+                        "Tested IP": fallback_ip,
+                        **stats,
+                        **geo_info
+                    })
+                    if live_results is not None:
+                        live_results[index].update(result)
+                    return result
+
+                if attempt < MAX_RETRIES - 1:
+                    result['Status'] = '🔁'
+                    result['Retry'] = attempt + 1
+                    if live_results is not None:
+                        live_results[index].update(result)
+                        await asyncio.sleep(0)
+                    await asyncio.sleep(RETRY_DELAY)
+
         result['Status'] = '❌'
-        if not targets:
-            result['Reason'] = 'DNSFail'
-        result['Retry'] = MAX_RETRIES
-    # Update live_results for failed case
     if live_results is not None:
         live_results[index].update(result)
     return result
