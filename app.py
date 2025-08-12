@@ -481,7 +481,7 @@ def handle_start_testing(payload=None):
                 selected_mode = (mode or 'accurate').lower()
                 print(f"🧭 Orchestration mode: {selected_mode}")
                 t0 = datetime.now()
-                if selected_mode == 'fast':
+                if selected_mode == 'xray-only' or selected_mode == 'default' or not selected_mode:
                     # Non-XRAY first, then XRAY confirm on successes to get real ISP
                     await run_phase(False)
                     t_mid = datetime.now()

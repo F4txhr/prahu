@@ -1,6 +1,6 @@
 // State
 let socket = null;
-let currentMode = 'accurate';
+let currentMode = 'default';
 let totals = { total: 0, completed: 0 };
 let results = [];
 let plannedTotal = 0; // total akun yang akan dites (dari add-links-and-test)
@@ -567,7 +567,7 @@ async function listGithub(){ try { const f = await api('/api/list-github-files')
 async function loadGithubFile(){ try { const file=$('#gh-files').value; if(!file){ toast('Select file','warning'); return; } const d=await api('/api/load-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'github',file_path:file})}); if(d.success){ toast(d.message||'Loaded','success'); } else { toast(d.message||'Load failed','error'); } } catch(err){ console.error(err); toast('Load failed','error'); } }
 
 // Add & Start
-function setMode(mode){ currentMode = mode; setModePill(mode); $all('.segmented-item').forEach(b=>b.classList.toggle('active', b.getAttribute('data-mode')===mode)); }
+function setMode(mode){ currentMode = 'default'; setModePill('XRAY'); }
 async function addAndStart(){
   try {
     const text = $('#vpn-input').value.trim(); if (!text){ toast('No input','warning'); return; }
@@ -580,7 +580,7 @@ async function addAndStart(){
     $('#vpn-input').value=''; toast('Starting tests…','info');
     // Show one global skeleton immediately to signal progress
     ensureGlobalSkeleton(true);
-    const payload = { mode: currentMode }; if (currentMode==='hybrid') { const n = parseInt($('#top-n').value||'20',10); payload.topN = isNaN(n)?20:Math.max(1,Math.min(999,n)); }
+    const payload = { mode: 'xray-only' };
     socket.emit('start_testing', payload);
   } catch (err) { console.error(err); toast('Start failed','error'); }
 }
@@ -630,7 +630,7 @@ function bindEvents(){
   const b3=$('#btn-list-gh'); if (b3) b3.addEventListener('click', () => { toast('Listing files…','info'); console.debug('[Action] listGitHub'); listGithub(); });
   const b4=$('#btn-load-gh'); if (b4) b4.addEventListener('click', () => { toast('Loading file…','info'); console.debug('[Action] loadGitHubFile'); loadGithubFile(); });
   const b5=$('#btn-add-test'); if (b5) b5.addEventListener('click', () => { toast('Adding & starting…','info'); console.debug('[Action] addAndStart'); addAndStart(); });
-  $all('.segmented-item').forEach(b=> b.addEventListener('click', ()=> { console.debug('[UI] setMode', b.getAttribute('data-mode')); setMode(b.getAttribute('data-mode')); }));
+  // mode removed
   const b6=$('#btn-apply-servers'); if (b6) b6.addEventListener('click', () => { toast('Applying servers…','info'); console.debug('[Action] applyServers'); applyServers(); });
   const b7=$('#btn-download-config'); if (b7) b7.addEventListener('click', () => { toast('Downloading…','info'); console.debug('[Action] downloadConfig'); downloadConfig(); });
   const b8=$('#btn-upload-github'); if (b8) b8.addEventListener('click', () => { console.debug('[UI] toggleUploadPanel'); toggleUploadPanel(); });
