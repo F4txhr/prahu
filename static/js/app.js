@@ -4,7 +4,7 @@ let currentMode = 'accurate';
 let totals = { total: 0, completed: 0 };
 let results = [];
 let plannedTotal = 0; // total akun yang akan dites (dari add-links-and-test)
-let floatSort = { field: 'finished', dir: 'desc' }; // sort field: 'tag'|'phase'|'latency'|'finished'
+let floatSort = { field: 'finished', dir: 'asc' }; // sort field: 'tag'|'phase'|'jitter'|'finished'
 let floatFilter = { live: false, dead: false, p2: false };
 
 // Utils
