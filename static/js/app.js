@@ -3,6 +3,7 @@ let socket = null;
 let currentMode = 'accurate';
 let totals = { total: 0, completed: 0 };
 let results = [];
+let plannedTotal = 0; // total akun yang akan dites (dari add-links-and-test)
 
 // Utils
 function $(q) { return document.querySelector(q); }
@@ -213,20 +214,22 @@ function initSocket() {
   socket.on('disconnect', () => setStatus('Disconnected', 'warning'));
   socket.on('testing_update', data => {
     try {
-      const total = getTotalValue(data);
-      const completed = data.completed ?? data.results?.filter(r => isFinalStatus(r.Status)).length ?? 0;
-      setProgress(completed, total);
+      // plannedTotal tetap dari awal; jika belum ada, ambil dari event
+      if (!plannedTotal) plannedTotal = getTotalValue(data);
       processResults(data.results || []);
-      rerenderTableInCompletionOrder(total);
+      // progress berdasarkan tabel final yang tampil
+      setProgress(displayOrder.length, plannedTotal);
+      rerenderTableInCompletionOrder(plannedTotal);
+      updateSummary();
     } catch (err) { console.error(err); }
   });
   socket.on('testing_complete', data => {
     try {
-      const total = data.total ?? getTotalValue(data);
-      setProgress(data.successful ?? 0, total);
+      if (!plannedTotal) plannedTotal = data.total ?? getTotalValue(data);
       processResults(data.results || []);
-      rerenderTableInCompletionOrder(total);
-      updateSummary((data.results || []).filter(shouldShowResult));
+      setProgress(displayOrder.length, plannedTotal);
+      rerenderTableInCompletionOrder(plannedTotal);
+      updateSummary();
       toast('Testing complete', 'success');
     } catch (err) { console.error(err); }
   });
@@ -282,9 +285,11 @@ function statusClass(s){ if (s==='✅') return 'badge-ok'; if (s==='❌' || s===
 
 // Summary
 function updateSummary(list){
-  const ok = list.filter(r=>r.Status==='✅').length;
-  const bad = list.filter(r=>r.Status==='❌' || r.Status==='Dead').length;
-  const lat = (()=>{ const l=list.filter(r=>r.Status==='✅' && r.Latency>-1).map(r=>+r.Latency); if(!l.length) return '–'; const avg=Math.round(l.reduce((a,b)=>a+b,0)/l.length); return `${avg} ms`; })();
+  // Hitung berdasarkan baris final yang tampil (displayOrder)
+  const shown = displayOrder.map(idx => latestByIndex.get(idx)).filter(Boolean);
+  const ok = shown.filter(r=>r.Status==='✅').length;
+  const bad = shown.filter(r=>r.Status==='❌' || r.Status==='Dead').length;
+  const lat = (()=>{ const l=shown.filter(r=>r.Status==='✅' && r.Latency>-1).map(r=>+r.Latency); if(!l.length) return '–'; const avg=Math.round(l.reduce((a,b)=>a+b,0)/l.length); return `${avg} ms`; })();
   $('#stat-success').textContent = ok; $('#stat-failed').textContent = bad; $('#stat-latency').textContent = lat;
 }
 
@@ -317,9 +322,9 @@ async function restoreTesting(){
   try {
     const d = await api('/api/get-testing-status');
     if (d.has_active_testing) {
-      const total = d.total ?? getTotalValue(d);
-      setProgress(d.completed ?? 0, total);
-      renderRows(d.results || []);
+      plannedTotal = d.total ?? getTotalValue(d);
+      // Biarkan proses update socket mengisi tabel; set indikator awal
+      setProgress(0, plannedTotal);
       setStatus('Restored','success');
     }
   } catch {}
@@ -358,7 +363,9 @@ async function addAndStart(){
     const res = await api('/api/add-links-and-test',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({links:text})});
     if (!res.success){ toast(res.message||'Add failed','error'); return; }
     resetTableState();
-    const total = getTotalValue(res); setProgress(0,total); $('#vpn-input').value=''; toast('Starting tests…','info');
+    plannedTotal = getTotalValue(res);
+    setProgress(0, plannedTotal);
+    $('#vpn-input').value=''; toast('Starting tests…','info');
     // Show one global skeleton immediately to signal progress
     ensureGlobalSkeleton(true);
     const payload = { mode: currentMode }; if (currentMode==='hybrid') { const n = parseInt($('#top-n').value||'20',10); payload.topN = isNaN(n)?20:Math.max(1,Math.min(999,n)); }
