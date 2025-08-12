@@ -229,16 +229,36 @@ function renderMainRow(r){
 function renderFloatRow(r){
   const status = normalizeStatus(r.Status);
   const tag = cleanTag(r.OriginalTag || r.tag || '');
-  const isp = (r.Provider || '-').toString().replace(/\(.*?\)/g,'').replace(/,+/g, ',').trim();
-  const ip = r['Tested IP'] || r.server || '-';
   const transport = (r.TestType||'').split(' ').slice(-1)[0] || '-';
   const phase = r.XRAY ? 'P2' : (isFinalStatus(r.Status)?'P1':'–');
   const finished = fmtTime(finishTimeByIndex.get(r.index));
+  const jsonStr = JSON.stringify(r);
+  const titleStatus = r.Reason ? `Reason: ${r.Reason}` : '';
   return `
     <td title="${escapeHtml(tag)}">${escapeHtml(truncate(tag,24))}</td>
     <td>${escapeHtml(transport)}</td>
     <td>${phase}</td>
-    <td>${escapeHtml(finished)}</td>`;
+    <td>${escapeHtml(finished)}</td>
+    <td>
+      <button class="btn btn-soft text-xs px-2 py-1" data-copy="tag" data-idx="${r.index}">Tag</button>
+      <button class="btn btn-soft text-xs px-2 py-1" data-copy="ip" data-idx="${r.index}">IP</button>
+      <button class="btn btn-soft text-xs px-2 py-1" data-copy="json" data-idx="${r.index}">JSON</button>
+    </td>`;
+}
+
+function bindCopyHandlers(){
+  const tbody = $('#float-body'); if (!tbody) return;
+  tbody.addEventListener('click', async (e)=>{
+    const btn = e.target.closest('button[data-copy]'); if (!btn) return;
+    const type = btn.getAttribute('data-copy');
+    const idx = parseInt(btn.getAttribute('data-idx'),10);
+    const r = latestByIndex.get(idx); if (!r) return;
+    try {
+      if (type==='tag') { await navigator.clipboard.writeText(cleanTag(r.OriginalTag || r.tag || '')); toast('Tag copied','success'); }
+      else if (type==='ip') { await navigator.clipboard.writeText(r['Tested IP'] || r.server || ''); toast('IP copied','success'); }
+      else if (type==='json') { await navigator.clipboard.writeText(JSON.stringify(r, null, 2)); toast('JSON copied','success'); }
+    } catch { toast('Copy failed','error'); }
+  });
 }
 
 function rerenderTableInCompletionOrder(totalHint) {
@@ -320,6 +340,7 @@ function bindFloatingControls(){
   const btn = $('#btn-toggle-float'); if (btn) btn.addEventListener('click', ()=> toggleFloatingPanel());
   const close = $('#btn-close-float'); if (close) close.addEventListener('click', ()=> toggleFloatingPanel(false));
   initFloatingDrag();
+  bindCopyHandlers();
 }
 
 function initFloatingDrag(){
