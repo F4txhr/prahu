@@ -4,6 +4,16 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>VortexVPN Manager</title>
+  <!--
+    File: templates/index.html
+    Ringkasan:
+    - Halaman utama frontend: struktur layout, area kontrol & tabel hasil
+    - Menggunakan Tailwind CDN untuk utility classes dan style lokal via static/css/style.css
+    - Script utama berada di static/js/app.js
+    Tips edit layout:
+    - Ubah grid/section di <main> untuk menyusun ulang kolom/urutan
+    - ID penting untuk JS: #btn-load-config, #btn-add-test, #results-body, #progress-bar, dst
+  -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
@@ -11,8 +21,10 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
 </head>
 <body class="min-h-screen bg-slate-950 text-slate-100 font-[Inter]">
+  <!-- Area toast notifikasi -->
   <div id="toast-container" class="fixed top-4 right-4 z-50 space-y-2"></div>
 
+  <!-- Header ringan: judul + indikator status koneksi socket -->
   <header class="border-b border-slate-800/80 bg-slate-950/70 backdrop-blur supports-[backdrop-filter]:backdrop-blur px-4 md:px-6">
     <div class="max-w-7xl mx-auto h-14 flex items-center justify-between">
       <div class="flex items-center gap-3">
@@ -28,15 +40,16 @@
 
   <main class="px-4 md:px-6 py-6">
     <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
-      <!-- Left column -->
+      <!-- Kiri: konfigurasi & start test -->
       <section class="lg:col-span-5 space-y-6">
-        <!-- Configuration Source -->
+        <!-- Configuration Source: pilih Template/GitHub, load config -->
         <div class="card">
           <div class="card-header">
             <h2 class="card-title">Configuration <button class="info-btn" data-info="Pilih sumber konfigurasi: Template lokal atau GitHub.">!</button></h2>
           </div>
           <div class="card-body space-y-4">
             <div class="flex items-center gap-4">
+              <!-- Radio source yang dibaca JS (currentSource) -->
               <label class="segmented">
                 <input type="radio" name="config-source" value="template" checked />
                 <span>Template</span>
@@ -45,10 +58,11 @@
                 <input type="radio" name="config-source" value="github" />
                 <span>GitHub</span>
               </label>
+              <!-- Tombol load config (lokal/GitHub) -->
               <button id="btn-load-config" class="btn btn-primary ml-auto">Load</button>
             </div>
 
-            <!-- GitHub credentials -->
+            <!-- Panel GitHub: token/owner/repo, list & load file json dari repo -->
             <div id="github-panel" class="hidden space-y-3">
               <div class="grid grid-cols-3 gap-3">
                 <input id="gh-token" type="password" class="input col-span-3" placeholder="GitHub Token" />
@@ -64,14 +78,16 @@
           </div>
         </div>
 
-        <!-- Add & Test -->
+        <!-- Add & Test: textarea input + mode + tombol start -->
         <div class="card">
           <div class="card-header">
             <h2 class="card-title">Add & Test <button class="info-btn" data-info="Tempel link VPN atau URL sumber (raw/API).">!</button></h2>
           </div>
           <div class="card-body space-y-3">
-            <textarea id="vpn-input" class="input h-28" placeholder="Tempel VPN links atau URL...\nvless://...\nhttps://raw.githubusercontent.com/...\nhttps://api.example.com/... "></textarea>
+            <!-- Textarea sumber link/URL dibaca JS saat Add & Start -->
+            <textarea id="vpn-input" class="input h-28" placeholder="Tempel VPN links atau URL...&#10;vless://...&#10;https://raw.githubusercontent.com/...&#10;https://api.example.com/... "></textarea>
             <div class="flex items-center gap-3">
+              <!-- Segmented mode (dibaca currentMode) -->
               <div class="segmented-group" role="tablist">
                 <button data-mode="accurate" class="segmented-item active">Accurate</button>
                 <button data-mode="fast" class="segmented-item">Fast</button>
@@ -85,9 +101,9 @@
         </div>
       </section>
 
-      <!-- Right column -->
+      <!-- Kanan: progres & hasil & aksi ekspor -->
       <section class="lg:col-span-7 space-y-6">
-        <!-- Live Testing -->
+        <!-- Live Testing: progress bar + tabel hasil (JS append ke #results-body) -->
         <div class="card">
           <div class="card-header">
             <h2 class="card-title">Live Testing <button class="info-btn" data-info="Progres pengujian akun secara real‑time.">!</button></h2>
@@ -113,19 +129,20 @@
                   </tr>
                 </thead>
                 <tbody id="results-body">
-                  <!-- rows injected here -->
+                  <!-- Baris hasil final + skeleton global di-inject oleh JS -->
                 </tbody>
               </table>
             </div>
           </div>
         </div>
 
-        <!-- Results & Actions -->
+        <!-- Results & Actions: ringkasan + export + download/upload github -->
         <div class="card">
           <div class="card-header">
             <h2 class="card-title">Results & Actions <button class="info-btn" data-info="Ringkasan hasil uji dan aksi ekspor.">!</button></h2>
           </div>
           <div class="card-body space-y-4">
+            <!-- Ringkasan angka (JS update) -->
             <div class="grid grid-cols-3 gap-3 text-center">
               <div class="stat"><div id="stat-success" class="stat-value">0</div><div class="stat-label">Success</div></div>
               <div class="stat"><div id="stat-failed" class="stat-value">0</div><div class="stat-label">Failed</div></div>
@@ -146,6 +163,7 @@
               </div>
             </div>
 
+            <!-- Panel upload (commit message) muncul saat klik Upload GitHub -->
             <div id="upload-panel" class="hidden grid grid-cols-5 gap-3">
               <input id="commit-message" class="input col-span-5 md:col-span-4" placeholder="Commit message" />
               <button id="btn-do-upload" class="btn btn-primary col-span-5 md:col-span-1">Upload</button>
@@ -156,7 +174,7 @@
     </div>
   </main>
 
-  <!-- Socket.IO client -->
+  <!-- Socket.IO client + app logic -->
   <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
   <script src="{{ url_for('static', filename='js/app.js') }}"></script>
 </body>
