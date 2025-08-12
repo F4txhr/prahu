@@ -226,10 +226,12 @@ function renderMainRow(r){
   const tag = cleanTag(r.OriginalTag || r.tag || '');
   const isp = (r.Provider || '-').toString().replace(/\(.*?\)/g,'').replace(/,+/g, ',').trim();
   const ip = r['Tested IP'] || r.server || '-';
+  const country = r.Country || '❓';
   return `
     <td title="${escapeHtml(tag)}">${escapeHtml(truncate(tag,24))}</td>
     <td>${escapeHtml((r.VpnType||r.type||'').toLowerCase())}</td>
     <td title="${escapeHtml(isp)}">${escapeHtml(truncate(isp,22))}</td>
+    <td>${escapeHtml(country)}</td>
     <td title="${escapeHtml(ip)}"><code>${escapeHtml(truncate(ip,18))}</code></td>
     <td>${fmtLatency(r.Latency)}</td>
     <td class="${statusClass(status)}" title="${escapeHtml(r.Reason||'')}">${status==='✅'?'Live':'Dead'}</td>`;
@@ -241,14 +243,14 @@ function renderFloatRow(r){
   const transport = (r.TestType||'').split(' ').slice(-1)[0] || '-';
   const phase = r.XRAY ? 'P2' : (isFinalStatus(r.Status)?'P1':'–');
   const finished = fmtTime(finishTimeByIndex.get(r.index));
-  const latency = Number.isFinite(+r.Latency) && +r.Latency>=0 ? `${r.Latency} ms` : '–';
+  const jitter = Number.isFinite(+r.Jitter) && +r.Jitter>=0 ? `${r.Jitter} ms` : '–';
   const titleStatus = r.Reason ? `Reason: ${r.Reason}` : '';
   const titleICMP = r.ICMP ? `ICMP: ${r.ICMP}` : '';
   return `
     <td title="${escapeHtml(tag)}">${escapeHtml(truncate(tag,24))}</td>
     <td>${escapeHtml(transport)}</td>
     <td title="${escapeHtml(titleStatus)}">${phase}</td>
-    <td title="${escapeHtml(titleICMP)}">${latency}</td>
+    <td title="${escapeHtml(titleICMP)}">${jitter}</td>
     <td>${escapeHtml(finished)}</td>
     <td>
       <button class="btn btn-soft text-xs px-2 py-1" data-copy="tag" data-idx="${r.index}">Tag</button>
@@ -311,25 +313,26 @@ function rerenderTableInCompletionOrder(totalHint) {
 function rerenderFloatingTable() {
   const tbody = $('#float-body'); if (!tbody) return;
   const frag = document.createDocumentFragment();
-  // Ambil list final
   let list = displayOrder.map(idx => latestByIndex.get(idx)).filter(Boolean);
   // Filter
-  list = list.filter(r => {
-    const s = normalizeStatus(r.Status);
-    const isLive = (s==='✅');
-    const isDead = (s==='❌' || s==='Dead');
-    const isP2 = !!r.XRAY;
-    if (floatFilter.live && !isLive) return false;
-    if (floatFilter.dead && !isDead) return false;
-    if (floatFilter.p2 && !isP2) return false;
-    return true;
-  });
+  if (floatFilter.live || floatFilter.dead || floatFilter.p2) {
+    list = list.filter(r => {
+      const s = normalizeStatus(r.Status);
+      const isLive = (s==='✅');
+      const isDead = (s==='❌' || s==='Dead');
+      const isP2 = !!r.XRAY;
+      if (floatFilter.live && !isLive) return false;
+      if (floatFilter.dead && !isDead) return false;
+      if (floatFilter.p2 && !isP2) return false;
+      return true;
+    });
+  }
   // Sort
   const getVal = (r) => {
     switch(floatSort.field){
       case 'tag': return cleanTag(r.OriginalTag||r.tag||'').toLowerCase();
       case 'phase': return r.XRAY ? 2 : 1; // P2 > P1
-      case 'latency': return Number.isFinite(+r.Latency)&&+r.Latency>=0 ? +r.Latency : 1e9;
+      case 'jitter': return Number.isFinite(+r.Jitter)&&+r.Jitter>=0 ? +r.Jitter : 1e9;
       case 'finished': return finishTimeByIndex.get(r.index) || 0;
       default: return finishTimeByIndex.get(r.index) || 0;
     }
@@ -340,6 +343,7 @@ function rerenderFloatingTable() {
     return floatSort.dir==='asc'?cmp:-cmp;
   });
 
+  // Append rows in order (update kebawah)
   for (const r of list) {
     const tr = document.createElement('tr');
     tr.innerHTML = renderFloatRow(r);
@@ -377,19 +381,20 @@ function bindFloatingControls(){
   initFloatingDrag();
   bindCopyHandlers();
   // Filters
-  const fLive=$('#flt-live'), fDead=$('#flt-dead'), fP2=$('#flt-p2');
+  const fAll=$('#flt-all'), fLive=$('#flt-live'), fDead=$('#flt-dead'), fP2=$('#flt-p2');
+  if (fAll) fAll.addEventListener('click', ()=>{ floatFilter={live:false,dead:false,p2:false}; [fAll,fLive,fDead,fP2].forEach(b=>b&&b.classList.remove('btn-primary')); rerenderFloatingTable(); });
   if (fLive) fLive.addEventListener('click', ()=>{ floatFilter.live=!floatFilter.live; fLive.classList.toggle('btn-primary', floatFilter.live); rerenderFloatingTable(); });
   if (fDead) fDead.addEventListener('click', ()=>{ floatFilter.dead=!floatFilter.dead; fDead.classList.toggle('btn-primary', floatFilter.dead); rerenderFloatingTable(); });
   if (fP2) fP2.addEventListener('click', ()=>{ floatFilter.p2=!floatFilter.p2; fP2.classList.toggle('btn-primary', floatFilter.p2); rerenderFloatingTable(); });
   // Sort header
-  const hTag=$('#sort-tag'), hPhase=$('#sort-phase'), hLat=$('#sort-latency'), hFin=$('#sort-finished');
+  const hTag=$('#sort-tag'), hPhase=$('#sort-phase'), hJit=$('#sort-jitter'), hFin=$('#sort-finished');
   function toggleSort(field){
     if (floatSort.field===field) floatSort.dir = (floatSort.dir==='asc'?'desc':'asc'); else { floatSort.field=field; floatSort.dir='asc'; }
     rerenderFloatingTable();
   }
   if (hTag) hTag.addEventListener('click', ()=> toggleSort('tag'));
   if (hPhase) hPhase.addEventListener('click', ()=> toggleSort('phase'));
-  if (hLat) hLat.addEventListener('click', ()=> toggleSort('latency'));
+  if (hJit) hJit.addEventListener('click', ()=> toggleSort('jitter'));
   if (hFin) hFin.addEventListener('click', ()=> toggleSort('finished'));
 }
 

@@ -124,6 +124,7 @@
                     <th>Tag</th>
                     <th>Type</th>
                     <th>ISP</th>
+                    <th>Country</th>
                     <th>IP</th>
                     <th>Latency</th>
                     <th>Status</th>
@@ -188,6 +189,7 @@
       </div>
       <div class="card-body space-y-3">
         <div class="flex items-center gap-2 text-xs">
+          <button id="flt-all" class="btn btn-soft text-xs px-3 py-1">All</button>
           <button id="flt-live" class="btn btn-soft text-xs px-3 py-1">Live</button>
           <button id="flt-dead" class="btn btn-soft text-xs px-3 py-1">Dead</button>
           <button id="flt-p2" class="btn btn-soft text-xs px-3 py-1">P2</button>
@@ -199,7 +201,7 @@
                 <th id="sort-tag">Tag</th>
                 <th>Transport</th>
                 <th id="sort-phase">Phase</th>
-                <th id="sort-latency">Latency</th>
+                <th id="sort-jitter">Jitter</th>
                 <th id="sort-finished">Finished</th>
                 <th>Copy</th>
               </tr>
