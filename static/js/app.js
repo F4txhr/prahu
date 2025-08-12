@@ -207,15 +207,16 @@ function ensureGlobalSkeleton(pending) {
 
 function cleanTag(tag) {
   let s = (tag || '').toString();
-  // Hapus emoji bendera: pasangan regional indicator symbols
+  // Hapus emoji bendera (regional indicator pairs)
   try { s = s.replace(/[\u{1F1E6}-\u{1F1FF}]{2}/gu, ''); } catch {}
-  // Hapus kode negara dalam kurung di mana pun: (FR), (SG), dll
-  s = s.replace(/\(\s*[A-Z]{2}\s*\)/g, '');
-  // Hapus kode negara 2 huruf di awal/akhir dengan pemisah opsional
-  s = s.replace(/^\s*(?:[-|–\/+,.;])?\s*[A-Z]{2}\s*(?:[-|–\/+,.;])?\s*/i, '');
-  s = s.replace(/\s*(?:[-|–\/+,.;])?\s*[A-Z]{2}\s*(?:[-|–\/+,.;])?\s*$/i, '');
-  // Bersihkan spasi berlebih dan punctuation di tepi
-  s = s.replace(/\s{2,}/g, ' ').replace(/^[^A-Za-z0-9]+/, '').replace(/[^A-Za-z0-9]+$/, '');
+  // Hapus kode negara di dalam kurung, contoh: (FR), (SG)
+  s = s.replace(/\(\s*[A-Z]{2,3}\s*\)/g, '');
+  // Hapus suffix penomoran seperti -1, - 2 di akhir
+  s = s.replace(/\s*-\s*\d+\s*$/g, '');
+  // Bersihkan separator di tepi (tanpa menghapus huruf di dalam kata)
+  s = s.replace(/^[\s\-–/+,.;:_]+/, '').replace(/[\s\-–/+,.;:_]+$/, '');
+  // Normalisasi spasi
+  s = s.replace(/\s{2,}/g, ' ');
   return s.trim();
 }
 function truncate(str, max){ const s=(str||'').toString(); return s.length>max ? s.slice(0,max-1)+'…' : s; }
