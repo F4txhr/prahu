@@ -833,6 +833,35 @@ class RealGeolocationTester:
             print(f"❌ Force domain lookup failed: {e}")
             return None
 
+    def _resolve_log_dir(self) -> str:
+        """Resolve preferred log directory: env XRAY_LOG_DIR, then ~/storage/shared/log_xray, then ~/log_xray, else temp dir."""
+        candidates = []
+        env_dir = os.getenv('XRAY_LOG_DIR')
+        if env_dir:
+            candidates.append(os.path.expanduser(env_dir))
+        # Prefer shared storage on Termux/Android
+        candidates.append(os.path.expanduser('~/storage/shared/log_xray'))
+        # Fallback: home directory
+        candidates.append(os.path.join(os.path.expanduser('~'), 'log_xray'))
+        # Last resort: system temp
+        candidates.append(tempfile.gettempdir())
+        for d in candidates:
+            try:
+                os.makedirs(d, exist_ok=True)
+                # quick writability check
+                test_path = os.path.join(d, '.wcheck')
+                with open(test_path, 'w') as f:
+                    f.write('ok')
+                try:
+                    os.remove(test_path)
+                except Exception:
+                    pass
+                return d
+            except Exception:
+                continue
+        # Should not reach here; fallback to temp
+        return tempfile.gettempdir()
+
     def _test_with_actual_vpn_connection(self, account):
         """Test dengan actual VPN connection seperti metode user"""
         print(f"🔎 XRAY path check: {self.xray_path}")
@@ -857,12 +886,22 @@ class RealGeolocationTester:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 json.dump(cfg, f)
                 tmp = f.name
-            # log Xray output ke file untuk debugging
-            logf = tempfile.NamedTemporaryFile(mode='wb', suffix='.log', delete=False)
-            log_path = logf.name
-            logf.close()
+            # log Xray output ke file untuk debugging (preferred directory)
+            log_dir = self._resolve_log_dir()
+            ts = time.strftime('%Y%m%d-%H%M%S')
+            pid = os.getpid()
+            try:
+                log_path = os.path.join(log_dir, f"xray_{ts}_{pid}.log")
+                log_out = open(log_path, 'ab')
+                log_err = open(log_path, 'ab')
+            except Exception:
+                # Fallback to temporary file if preferred dir is not writable at runtime
+                log_tmp = tempfile.NamedTemporaryFile(mode='ab', suffix='.log', delete=False)
+                log_path = log_tmp.name
+                log_out = log_tmp
+                log_err = open(log_path, 'ab')
             print(f"📝 XRAY log: {log_path}")
-            proc = subprocess.Popen([self.xray_path, '-c', tmp], stdout=open(log_path, 'ab'), stderr=open(log_path, 'ab'))
+            proc = subprocess.Popen([self.xray_path, '-c', tmp], stdout=log_out, stderr=log_err)
             return proc, tmp
         
         def stop_and_cleanup(proc, tmp):
