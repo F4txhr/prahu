@@ -97,7 +97,20 @@ class RealGeolocationTester:
         ]
         if RealGeolocationTester._pool is None:
             RealGeolocationTester._pool = threading.Semaphore(self._pool_size)
-        
+
+    def _get_log_paths(self) -> tuple[str, str]:
+        """Return (access_log, error_log) paths under Termux/home directory.
+        XRAY_LOG_DIR env can override the directory.
+        """
+        log_dir = os.getenv('XRAY_LOG_DIR') or os.path.join(os.path.expanduser('~'), 'xray')
+        try:
+            os.makedirs(log_dir, exist_ok=True)
+        except Exception:
+            pass
+        access_path = os.path.join(log_dir, 'access.log')
+        error_path = os.path.join(log_dir, 'error.log')
+        return access_path, error_path
+    
     def extract_real_ip_from_path(self, path):
         """Extract IP dari path seperti metode user"""
         if not path:
@@ -263,9 +276,18 @@ class RealGeolocationTester:
                 "path": transport.get('path', '/') if isinstance(transport, dict) else '/',
                 "headers": transport.get('headers', {}) if isinstance(transport, dict) else {}
             }
-            # Ensure Host header present for WS if possible
-            if tls_enabled and not ws_settings["headers"].get('Host'):
-                ws_settings["headers"]['Host'] = tls_config.get('sni') or tls_config.get('server_name') or account.get('server', '')
+            # Prefer independent host field per Xray deprecation notice
+            host_value = (
+                tls_config.get('sni')
+                or tls_config.get('server_name')
+                or (transport.get('headers', {}).get('Host') if isinstance(transport, dict) and isinstance(transport.get('headers'), dict) else None)
+                or account.get('server', '')
+            )
+            if host_value:
+                ws_settings["host"] = host_value
+            # Ensure Host header present for backward compatibility
+            if tls_enabled and not ws_settings["headers"].get('Host') and host_value:
+                ws_settings["headers"]['Host'] = host_value
             outbound['streamSettings']['wsSettings'] = ws_settings
         
         # --- PROTOCOL SETTINGS (User's improved approach) ---
@@ -327,8 +349,23 @@ class RealGeolocationTester:
             # Unknown protocol; let Xray handle basic fields
             outbound['settings'] = {}
         
+        # Build top-level config with DNS and logs to Termux/home
+        log_level = os.getenv('XRAY_LOG_LEVEL', 'info')
+        access_log, error_log = self._get_log_paths()
+        dns_mode = os.getenv('XRAY_DNS_MODE', 'doh').lower()  # doh | udp
+        dns1 = os.getenv('XRAY_DNS1')
+        dns2 = os.getenv('XRAY_DNS2')
+        if dns_mode == 'udp':
+            servers = [dns1 or "1.1.1.1", dns2 or "8.8.8.8"]
+        else:
+            servers = [
+                {"address": dns1 or "https+local://1.1.1.1/dns-query"},
+                {"address": dns2 or "https+local://8.8.8.8/dns-query"}
+            ]
+        
         return {
-            "log": {"loglevel": "warning"},
+            "log": {"loglevel": log_level, "access": access_log, "error": error_log},
+            "dns": {"queryStrategy": "UseIPv4", "servers": servers},
             "inbounds": [{
                 "port": self.local_http_port,
                 "protocol": "http",
@@ -844,15 +881,11 @@ class RealGeolocationTester:
             cfg = self.create_xray_config(acc)
             if not cfg:
                 return None, None
+            # write config to a temporary file; logging is handled by Xray per config
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 json.dump(cfg, f)
                 tmp = f.name
-            # log Xray output ke file untuk debugging
-            logf = tempfile.NamedTemporaryFile(mode='wb', suffix='.log', delete=False)
-            log_path = logf.name
-            logf.close()
-            print(f"📝 XRAY log: {log_path}")
-            proc = subprocess.Popen([self.xray_path, '-c', tmp], stdout=open(log_path, 'ab'), stderr=open(log_path, 'ab'))
+            proc = subprocess.Popen([self.xray_path, '-c', tmp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return proc, tmp
         
         def stop_and_cleanup(proc, tmp):
