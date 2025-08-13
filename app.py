@@ -12,6 +12,7 @@ import subprocess
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from io import BytesIO
+import shutil
 
 load_dotenv()
 
