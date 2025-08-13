@@ -102,11 +102,23 @@ class RealGeolocationTester:
         """Return (access_log, error_log) paths under Termux/home directory.
         XRAY_LOG_DIR env can override the directory.
         """
-        log_dir = os.getenv('XRAY_LOG_DIR') or os.path.join(os.path.expanduser('~'), 'xray')
+        default_dir = os.path.join(os.path.expanduser('~'), 'xray')
+        log_dir = os.getenv('XRAY_LOG_DIR') or default_dir
+        # If path exists but is not a directory (e.g., user put binary at ~/xray), fallback
+        if os.path.exists(log_dir) and not os.path.isdir(log_dir):
+            fallback = os.path.join(os.path.expanduser('~'), 'xray_logs')
+            os.environ['XRAY_LOG_DIR'] = fallback
+            log_dir = fallback
         try:
             os.makedirs(log_dir, exist_ok=True)
         except Exception:
-            pass
+            # As last resort, use temp dir
+            tmp = tempfile.gettempdir()
+            log_dir = os.path.join(tmp, 'xray_logs')
+            try:
+                os.makedirs(log_dir, exist_ok=True)
+            except Exception:
+                pass
         access_path = os.path.join(log_dir, 'access.log')
         error_path = os.path.join(log_dir, 'error.log')
         return access_path, error_path
