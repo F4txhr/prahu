@@ -24,6 +24,9 @@ XRAY_DNS2=https+local://8.8.8.8/dns-query
 XRAY_LOG_LEVEL=info       # info|warning|error
 XRAY_LOG_DIR=~/xray       # default: $HOME/xray
 XRAY_TLS_INSECURE=0       # set 1 untuk skip verifikasi TLS (darurat saja)
+XRAY_ALPN=h2,h3            # override ALPN (opsional)
+XRAY_TLS_FP=chrome         # uTLS fingerprint, alias: XRAY_TLS_FINGERPRINT
+XRAY_DISABLE_MUX=1         # disable MUX untuk stabilitas (default 1)
 ```
 
 Catatan Termux/Android:
@@ -36,4 +39,5 @@ export SSL_CERT_DIR=$PREFIX/etc/tls/certs
 
 Menjalankan aplikasi:
 
+```
 ```

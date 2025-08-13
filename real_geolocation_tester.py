@@ -157,11 +157,51 @@ class RealGeolocationTester:
             return host
         except Exception:
             pass
-        # Cloudflare DoH first (bootstrapless endpoint)
+        # Prefer using curl (more reliable CA on Termux) to query DoH JSON endpoints
+        try:
+            import shutil as _shutil
+            curl_bin = _shutil.which('curl')
+        except Exception:
+            curl_bin = None
+        doh_urls = [
+            lambda h: f"https://1.1.1.1/dns-query?name={h}&type=A",
+            lambda h: f"https://dns.google/resolve?name={h}&type=A"
+        ]
+        if curl_bin:
+            for url_builder in doh_urls:
+                try:
+                    url = url_builder(host)
+                    proc = subprocess.run(
+                        [curl_bin, '-sS', '--max-time', '3', '-H', 'accept: application/dns-json', url],
+                        capture_output=True, text=True, timeout=4
+                    )
+                    if proc.returncode == 0 and proc.stdout.strip():
+                        data = json.loads(proc.stdout)
+                        for ans in data.get('Answer') or []:
+                            ip = ans.get('data')
+                            try:
+                                socket.inet_aton(ip)
+                                return ip
+                            except Exception:
+                                continue
+                except Exception:
+                    continue
+        # Fallback: urllib with certifi-backed SSL context if available
+        ssl_ctx = None
+        try:
+            import ssl as _ssl
+            try:
+                import certifi as _certifi
+                ssl_ctx = _ssl.create_default_context(cafile=_certifi.where())
+            except Exception:
+                ssl_ctx = _ssl.create_default_context()
+        except Exception:
+            ssl_ctx = None
+        # Cloudflare DoH first
         try:
             url = f"https://1.1.1.1/dns-query?name={host}&type=A"
             req = urllib.request.Request(url, headers={'accept': 'application/dns-json'})
-            with urllib.request.urlopen(req, timeout=3.0) as resp:
+            with urllib.request.urlopen(req, timeout=3.0, context=ssl_ctx) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
                 for ans in data.get('Answer') or []:
                     ip = ans.get('data')
@@ -175,15 +215,19 @@ class RealGeolocationTester:
         # Google DoH fallback
         try:
             url = f"https://dns.google/resolve?name={host}&type=A"
-            with urllib.request.urlopen(url, timeout=3.0) as resp:
-                data = json.loads(resp.read().decode('utf-8'))
-                for ans in data.get('Answer') or []:
-                    ip = ans.get('data')
-                    try:
-                        socket.inet_aton(ip)
-                        return ip
-                    except Exception:
-                        continue
+            if ssl_ctx is not None:
+                with urllib.request.urlopen(url, timeout=3.0, context=ssl_ctx) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+            else:
+                with urllib.request.urlopen(url, timeout=3.0) as resp:
+                    data = json.loads(resp.read().decode('utf-8'))
+            for ans in data.get('Answer') or []:
+                ip = ans.get('data')
+                try:
+                    socket.inet_aton(ip)
+                    return ip
+                except Exception:
+                    continue
         except Exception:
             pass
         return None
@@ -357,6 +401,10 @@ class RealGeolocationTester:
                 # Optional ALPN
                 if alpn:
                     tls_settings["alpn"] = [alpn] if isinstance(alpn, str) else alpn
+                # Env override for ALPN (comma-separated)
+                env_alpn = os.getenv('XRAY_ALPN')
+                if env_alpn:
+                    tls_settings["alpn"] = [x.strip() for x in env_alpn.split(',') if x.strip()]
                 # Optional allowInsecure via env
                 try:
                     insecure = os.getenv('XRAY_TLS_INSECURE', '0').strip().lower() in ('1','true','yes','on')
@@ -364,6 +412,10 @@ class RealGeolocationTester:
                         tls_settings["allowInsecure"] = True
                 except Exception:
                     pass
+                # Optional uTLS fingerprint via env
+                fp = os.getenv('XRAY_TLS_FP') or os.getenv('XRAY_TLS_FINGERPRINT')
+                if fp:
+                    tls_settings["utls"] = {"fingerprint": fp}
                 stream_settings['tlsSettings'] = tls_settings
             if network_type == 'ws':
                 ws_settings = {
@@ -393,6 +445,12 @@ class RealGeolocationTester:
                     "security": "tls",
                     "tlsSettings": {"serverName": sni or host_hdr or server_addr}
                 }
+                # Env overrides for TCP+TLS
+                if os.getenv('XRAY_ALPN'):
+                    outbound['streamSettings']['tlsSettings']['alpn'] = [x.strip() for x in os.getenv('XRAY_ALPN').split(',') if x.strip()]
+                fp = os.getenv('XRAY_TLS_FP') or os.getenv('XRAY_TLS_FINGERPRINT')
+                if fp:
+                    outbound['streamSettings']['tlsSettings']['utls'] = {"fingerprint": fp}
 
         # --- VLESS & VMESS & TROJAN & SHADOWSOCKS ---
         if protocol_name == 'vless':
