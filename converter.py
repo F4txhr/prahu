@@ -115,6 +115,8 @@ def parse_vless(link):
             "enabled": params.get("security", ["tls"])[0] == "tls",
             "server_name": params.get("sni", [url.hostname])[0],
             "insecure": params.get("allowInsecure", ["false"])[0] == "true",
+            "fingerprint": params.get("fp", [""])[0],
+            "alpn": [a for a in params.get("alpn", [""])[0].split(",") if a]
         },
         "transport": {},
     }
@@ -144,6 +146,8 @@ def parse_trojan(link):
             "enabled": params.get("security", ["tls"])[0] == "tls",
             "server_name": params.get("sni", [url.hostname])[0],
             "insecure": params.get("allowInsecure", ["false"])[0] == "true",
+            "fingerprint": params.get("fp", [""])[0],
+            "alpn": [a for a in params.get("alpn", [""])[0].split(",") if a]
         },
         "transport": {},
     }

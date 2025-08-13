@@ -276,6 +276,13 @@ class RealGeolocationTester:
                     tls_settings["alpn"] = [alpn.strip()]
             except Exception:
                 pass
+            # map uTLS fingerprint if present (fp)
+            try:
+                fp = tls_config.get('fingerprint') if isinstance(tls_config, dict) else None
+                if isinstance(fp, str) and fp.strip():
+                    tls_settings["fingerprint"] = fp.strip()
+            except Exception:
+                pass
             outbound['streamSettings']['tlsSettings'] = tls_settings
         
         # WS settings
