@@ -335,9 +335,10 @@ class RealGeolocationTester:
             "log": {"loglevel": "warning"},
             "dns": {
                 "queryStrategy": "UseIPv4",
+                "disableFallback": True,
                 "servers": [
-                    "1.1.1.1",
-                    "8.8.8.8"
+                    { "address": "1.1.1.1" },
+                    { "address": "8.8.8.8" }
                 ]
             },
             "inbounds": [{
