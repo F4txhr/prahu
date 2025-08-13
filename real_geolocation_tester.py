@@ -111,6 +111,31 @@ class RealGeolocationTester:
         error_path = os.path.join(log_dir, 'error.log')
         return access_path, error_path
 
+    def _ensure_ca_bundle_env(self) -> None:
+        """Ensure Go TLS can find CA bundle (important on Termux/Android)."""
+        prefix = os.getenv('PREFIX') or '/data/data/com.termux/files/usr'
+        if not os.getenv('SSL_CERT_FILE'):
+            candidates = [
+                os.path.join(prefix, 'etc/tls/cert.pem'),
+                os.path.join(prefix, 'etc/ssl/cert.pem'),
+                '/etc/ssl/certs/ca-certificates.crt',
+                '/etc/ssl/cert.pem'
+            ]
+            for p in candidates:
+                if os.path.exists(p):
+                    os.environ['SSL_CERT_FILE'] = p
+                    break
+        if not os.getenv('SSL_CERT_DIR'):
+            candidates_dir = [
+                os.path.join(prefix, 'etc/tls/certs'),
+                os.path.join(prefix, 'etc/ssl/certs'),
+                '/etc/ssl/certs'
+            ]
+            for d in candidates_dir:
+                if os.path.isdir(d):
+                    os.environ['SSL_CERT_DIR'] = d
+                    break
+
     def _resolve_to_ip(self, host: str) -> str | None:
         """Resolve hostname to IPv4 via DoH to avoid system resolver; returns IP or None."""
         if not host:
@@ -309,6 +334,13 @@ class RealGeolocationTester:
             host_hdr = headers.get('Host') if isinstance(headers, dict) else None
             sni = tls_config.get('sni') or tls_config.get('server_name') or host_hdr or account.get('server', '')
             outbound['streamSettings']['tlsSettings'] = {"serverName": sni}
+            # Optional insecure toggle for environments without CA bundle
+            try:
+                insecure = os.getenv('XRAY_TLS_INSECURE', '0').strip().lower() in ('1','true','yes','on')
+                if insecure:
+                    outbound['streamSettings']['tlsSettings']["allowInsecure"] = True
+            except Exception:
+                pass
         
         # WS settings
         if network_type == 'ws':
@@ -923,6 +955,8 @@ class RealGeolocationTester:
                 return s.getsockname()[1]
 
         def build_and_start(acc):
+            # Make sure CA bundle env is visible to child process
+            self._ensure_ca_bundle_env()
             cfg = self.create_xray_config(acc)
             if not cfg:
                 return None, None

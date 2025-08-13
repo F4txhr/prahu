@@ -23,22 +23,17 @@ XRAY_DNS1=https+local://1.1.1.1/dns-query
 XRAY_DNS2=https+local://8.8.8.8/dns-query
 XRAY_LOG_LEVEL=info       # info|warning|error
 XRAY_LOG_DIR=~/xray       # default: $HOME/xray
+XRAY_TLS_INSECURE=0       # set 1 untuk skip verifikasi TLS (darurat saja)
+```
+
+Catatan Termux/Android:
+- Pastikan paket CA terpasang: `pkg install ca-certificates`
+- Jika masih gagal TLS, set env berikut sebelum menjalankan:
+```
+export SSL_CERT_FILE=$PREFIX/etc/tls/cert.pem
+export SSL_CERT_DIR=$PREFIX/etc/tls/certs
 ```
 
 Menjalankan aplikasi:
 
 ```
-python run.py
-# atau
-python -c "import app; app.socketio.run(app.app, host='0.0.0.0', port=5000, debug=False)"
-```
-
-Catatan testing:
-
-- Tanpa Xray: tester melakukan TCP connect dan fallback ping; akan ditingkatkan dengan TLS/WS probe.
-- Dengan Xray (opsional): tester melakukan koneksi HTTP melalui proxy untuk mengambil egress IP dan ISP yang real. DNS menggunakan DoH IPv4-only secara default dan log ditulis ke `~/xray/`.
-
-Keamanan:
-
-- Simpan token GitHub di database, jangan kirim kembali ke frontend.
-- Gunakan `.env` untuk SECRET_KEY dan path Xray.
