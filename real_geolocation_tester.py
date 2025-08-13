@@ -260,12 +260,15 @@ class RealGeolocationTester:
         # WS settings
         if network_type == 'ws':
             ws_settings = {
-                "path": transport.get('path', '/') if isinstance(transport, dict) else '/',
-                "headers": transport.get('headers', {}) if isinstance(transport, dict) else {}
+                "path": transport.get('path', '/') if isinstance(transport, dict) else '/'
             }
-            # Ensure Host header present for WS if possible
-            if tls_enabled and not ws_settings["headers"].get('Host'):
-                ws_settings["headers"]['Host'] = tls_config.get('sni') or tls_config.get('server_name') or account.get('server', '')
+            # Prefer independent 'host' (avoid deprecated headers.Host)
+            headers = transport.get('headers', {}) if isinstance(transport, dict) else {}
+            host_hdr = headers.get('Host')
+            if not host_hdr:
+                host_hdr = tls_config.get('sni') or tls_config.get('server_name') or account.get('server', '')
+            if host_hdr:
+                ws_settings["host"] = host_hdr
             outbound['streamSettings']['wsSettings'] = ws_settings
         
         # --- PROTOCOL SETTINGS (User's improved approach) ---
@@ -329,6 +332,13 @@ class RealGeolocationTester:
         
         return {
             "log": {"loglevel": "warning"},
+            "dns": {
+                "queryStrategy": "UseIPv4",
+                "servers": [
+                    "1.1.1.1",
+                    "8.8.8.8"
+                ]
+            },
             "inbounds": [{
                 "port": self.local_http_port,
                 "protocol": "http",
