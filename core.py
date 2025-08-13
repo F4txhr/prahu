@@ -8,8 +8,56 @@ def clean_account_dict(account: dict) -> dict:
     return {k: v for k, v in account.items() if not k.startswith("_")}
 
 def deduplicate_accounts(accounts: list) -> list:
-    # Simple: no deduplication. Add logic if needed.
-    return accounts
+    """
+    Remove exact-duplicate accounts within current session only (no persistent cache).
+    Two accounts are considered duplicates if their identity fields are identical.
+    """
+    if not isinstance(accounts, list):
+        return []
+
+    def normalize_account_identity(account: dict) -> str:
+        """Build a stable identity string for an account."""
+        if not isinstance(account, dict):
+            return "{}"
+        transport = account.get("transport", {}) if isinstance(account.get("transport"), dict) else {}
+        headers = transport.get("headers", {}) if isinstance(transport.get("headers"), dict) else {}
+        tls_cfg = account.get("tls", {}) if isinstance(account.get("tls"), dict) else {}
+        identity = {
+            "type": account.get("type"),
+            "server": account.get("server"),
+            "server_port": int(account.get("server_port", 443) or 443),
+            # Protocol‑specific unique fields
+            "uuid": account.get("uuid"),           # vless/vmess
+            "password": account.get("password"),   # trojan/ss
+            "method": account.get("method"),       # ss
+            # Transport basics
+            "transport": {
+                "type": transport.get("type"),
+                "path": transport.get("path"),
+                # Use effective host if present (legacy headers.Host may exist)
+                "host": headers.get("Host")
+            },
+            # TLS basics
+            "tls": {
+                "enabled": bool(tls_cfg.get("enabled")),
+                "sni": tls_cfg.get("sni") or tls_cfg.get("server_name")
+            }
+        }
+        try:
+            import json as _json
+            return _json.dumps(identity, sort_keys=True, separators=(",", ":"))
+        except Exception:
+            return str(identity)
+
+    seen: dict[str, dict] = {}
+    result: list[dict] = []
+    for acc in accounts:
+        key = normalize_account_identity(acc)
+        if key in seen:
+            continue
+        seen[key] = acc
+        result.append(acc)
+    return result
 
 def sort_priority(res):
     country = res.get("Country", "")
