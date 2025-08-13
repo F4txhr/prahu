@@ -104,6 +104,62 @@ def fetch_vpn_links_from_url(url, url_type='auto'):
     except Exception as e:
         return {'success': False, 'error': f'Error fetching from URL: {e}'}
 
+def _preflight_environment():
+    """Ensure Termux/Unix environment has required tools and certs for Xray tests."""
+    try:
+        prefix = os.getenv('PREFIX') or '/data/data/com.termux/files/usr'
+        is_termux = os.path.exists(prefix)
+        # Ensure CA certificates installed (Termux)
+        if is_termux:
+            def has_pkg(name: str) -> bool:
+                return os.path.exists(os.path.join(prefix, 'var/lib/dpkg/status')) and (name in open(os.path.join(prefix, 'var/lib/dpkg/status'), 'r', errors='ignore').read())
+            # Install ca-certificates and curl if apt available
+            apt = os.path.join(prefix, 'bin/apt')
+            pkg_bin = os.path.join(prefix, 'bin/pkg')
+            need_install = []
+            if not os.path.exists(os.path.join(prefix, 'etc/tls/cert.pem')):
+                need_install.append('ca-certificates')
+            if not shutil.which('curl'):
+                need_install.append('curl')
+            if need_install:
+                installer = apt if os.path.exists(apt) else (pkg_bin if os.path.exists(pkg_bin) else None)
+                if installer:
+                    try:
+                        subprocess.run([installer, 'update', '-y'], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                        subprocess.run([installer, 'install', '-y'] + need_install, check=False)
+                    except Exception:
+                        pass
+        # Set SSL cert env if not present
+        if not os.getenv('SSL_CERT_FILE'):
+            candidates = [
+                os.path.join(prefix, 'etc/tls/cert.pem'),
+                os.path.join(prefix, 'etc/ssl/cert.pem'),
+                '/etc/ssl/certs/ca-certificates.crt',
+                '/etc/ssl/cert.pem'
+            ]
+            for p in candidates:
+                if os.path.exists(p):
+                    os.environ['SSL_CERT_FILE'] = p
+                    break
+        if not os.getenv('SSL_CERT_DIR'):
+            candidates_dir = [
+                os.path.join(prefix, 'etc/tls/certs'),
+                os.path.join(prefix, 'etc/ssl/certs'),
+                '/etc/ssl/certs'
+            ]
+            for d in candidates_dir:
+                if os.path.isdir(d):
+                    os.environ['SSL_CERT_DIR'] = d
+                    break
+        # Ensure XRAY_LOG_DIR exists and not conflicting with file
+        log_dir = os.getenv('XRAY_LOG_DIR') or os.path.join(os.path.expanduser('~'), 'xray')
+        if os.path.exists(log_dir) and not os.path.isdir(log_dir):
+            log_dir = os.path.join(os.path.expanduser('~'), 'xray_logs')
+            os.environ['XRAY_LOG_DIR'] = log_dir
+        os.makedirs(log_dir, exist_ok=True)
+    except Exception as e:
+        print(f"⚠️ Preflight env warning: {e}")
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -368,8 +424,10 @@ def handle_start_testing(payload=None):
         print(f"🧭 Testing mode: {mode}{' (Top‑N='+str(top_n)+')' if (mode=='hybrid' and top_n) else ''}")
     print(f"🔍 DEBUG: start_testing received, accounts count: {len(session_data['all_accounts'])}")
 
-    # PRE-FLIGHT: ensure required tools (XRAY) available
+    # PRE-FLIGHT: ensure required tools and env
     try:
+        import shutil
+        _preflight_environment()
         from real_geolocation_tester import ensure_xray_available
         xray_path = ensure_xray_available()
         if xray_path:
