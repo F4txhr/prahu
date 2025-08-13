@@ -244,6 +244,7 @@ function renderFloatRow(r){
   const phase = r.XRAY ? 'P2' : (isFinalStatus(r.Status)?'P1':'–');
   const finished = fmtTime(finishTimeByIndex.get(r.index));
   const jitter = Number.isFinite(+r.Jitter) && +r.Jitter>=0 ? `${r.Jitter} ms` : '–';
+  const asn = r.ASN || '-';
   const titleStatus = r.Reason ? `Reason: ${r.Reason}` : '';
   const titleICMP = r.ICMP ? `ICMP: ${r.ICMP}` : '';
   return `
@@ -251,6 +252,7 @@ function renderFloatRow(r){
     <td>${escapeHtml(transport)}</td>
     <td title="${escapeHtml(titleStatus)}">${phase}</td>
     <td title="${escapeHtml(titleICMP)}">${jitter}</td>
+    <td>${escapeHtml(asn)}</td>
     <td>${escapeHtml(finished)}</td>
     <td>
       <button class="btn btn-soft text-xs px-2 py-1" data-copy="tag" data-idx="${r.index}">Tag</button>

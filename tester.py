@@ -256,7 +256,8 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         "Jitter": 0,
                         "ICMP": "✔",
                         "Provider": ("CDN (front)" if is_cdn else provider),
-                        "Country": geo_info.get('Country', '❓')
+                        "Country": geo_info.get('Country', '❓'),
+                        "ASN": geo_info.get('ASN', '-')
                     })
                     print(f"✅ NON-XRAY success: {vpn_type} {test_ip}:{test_port} ({result['TestType']})")
                     if live_results is not None:
