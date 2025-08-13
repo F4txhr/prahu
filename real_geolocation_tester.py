@@ -524,6 +524,14 @@ class RealGeolocationTester:
         else:
             outbound['settings'] = {}
 
+        # MUX control via environment (default: disabled for stability)
+        try:
+            disable_mux = os.getenv('XRAY_DISABLE_MUX', '1').strip().lower() in ('1', 'true', 'yes', 'on')
+        except Exception:
+            disable_mux = True
+        if disable_mux:
+            outbound['mux'] = {"enabled": False}
+
         # Top-level with logs, DNS and inbound binding
         log_level = os.getenv('XRAY_LOG_LEVEL', 'info')
         access_log, error_log = self._get_log_paths()
