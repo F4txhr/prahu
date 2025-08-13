@@ -259,7 +259,24 @@ class RealGeolocationTester:
         if tls_enabled:
             outbound['streamSettings']['security'] = 'tls'
             sni = (tls_config.get('sni') if isinstance(tls_config, dict) else None) or (tls_config.get('server_name') if isinstance(tls_config, dict) else None) or eff_host
-            outbound['streamSettings']['tlsSettings'] = {"serverName": sni}
+            tls_settings = {"serverName": sni}
+            # map allowInsecure
+            try:
+                insecure = bool(tls_config.get('insecure')) if isinstance(tls_config, dict) else False
+                if insecure:
+                    tls_settings["allowInsecure"] = True
+            except Exception:
+                pass
+            # map ALPN if present (list or string)
+            try:
+                alpn = tls_config.get('alpn') if isinstance(tls_config, dict) else None
+                if isinstance(alpn, list) and all(isinstance(x, str) for x in alpn) and alpn:
+                    tls_settings["alpn"] = alpn
+                elif isinstance(alpn, str) and alpn.strip():
+                    tls_settings["alpn"] = [alpn.strip()]
+            except Exception:
+                pass
+            outbound['streamSettings']['tlsSettings'] = tls_settings
         
         # WS settings
         if network_type == 'ws':
@@ -270,6 +287,32 @@ class RealGeolocationTester:
             if eff_host:
                 ws_settings["host"] = eff_host
             outbound['streamSettings']['wsSettings'] = ws_settings
+        elif network_type == 'grpc':
+            # gRPC settings if provided
+            grpc_settings = {}
+            try:
+                service = transport.get('service_name') or transport.get('serviceName') if isinstance(transport, dict) else None
+                if not service:
+                    service = account.get('service_name') or account.get('serviceName')
+                if service:
+                    grpc_settings['serviceName'] = service
+            except Exception:
+                pass
+            if grpc_settings:
+                outbound['streamSettings']['grpcSettings'] = grpc_settings
+        elif network_type in ('http', 'h2', 'xhttp'):
+            # HTTP/2 style settings when available
+            http_settings = {}
+            try:
+                p = transport.get('path') if isinstance(transport, dict) else None
+                if p:
+                    http_settings['path'] = p
+                if eff_host:
+                    http_settings['host'] = [eff_host]
+            except Exception:
+                pass
+            if http_settings:
+                outbound['streamSettings']['httpSettings'] = http_settings
         
         # --- PROTOCOL SETTINGS (build using eff_host only) ---
         port_val = int(account.get('server_port', 443) or 443)
@@ -295,7 +338,7 @@ class RealGeolocationTester:
             alter_id = account.get('alter_id', account.get('alterId'))
             if alter_id is not None:
                 user_config["alterId"] = int(alter_id)
-            encryption = account.get('encryption')
+            encryption = account.get('encryption') or account.get('security')
             if encryption:
                 user_config["encryption"] = encryption
             outbound['settings'] = {

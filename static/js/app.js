@@ -625,6 +625,11 @@ function bindEvents(){
   bindRipple();
   bindFloatingControls();
   $all('input[name="config-source"]').forEach(r=>r.addEventListener('change', () => { console.debug('[UI] source change'); switchSourceUI(); }));
+  // Bind test mode radios
+  $all('input[name="test-mode"]').forEach(r=>r.addEventListener('change', (e) => {
+    const v = e.target.value === 'xray-only' ? 'xray-only' : 'fast';
+    setMode(v);
+  }));
   const b1=$('#btn-load-config'); if (b1) b1.addEventListener('click', () => { toast('Loading config…','info'); console.debug('[Action] loadConfig'); loadConfig(); });
   const b2=$('#btn-save-gh'); if (b2) b2.addEventListener('click', () => { toast('Saving GitHub…','info'); console.debug('[Action] saveGitHub'); loadConfig(); });
   const b3=$('#btn-list-gh'); if (b3) b3.addEventListener('click', () => { toast('Listing files…','info'); console.debug('[Action] listGitHub'); listGithub(); });
