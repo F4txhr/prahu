@@ -110,6 +110,46 @@ class RealGeolocationTester:
         access_path = os.path.join(log_dir, 'access.log')
         error_path = os.path.join(log_dir, 'error.log')
         return access_path, error_path
+
+    def _resolve_to_ip(self, host: str) -> str | None:
+        """Resolve hostname to IPv4 via DoH to avoid system resolver; returns IP or None."""
+        if not host:
+            return None
+        try:
+            socket.inet_aton(host)
+            return host
+        except Exception:
+            pass
+        # Cloudflare DoH first (bootstrapless endpoint)
+        try:
+            url = f"https://1.1.1.1/dns-query?name={host}&type=A"
+            req = urllib.request.Request(url, headers={'accept': 'application/dns-json'})
+            with urllib.request.urlopen(req, timeout=3.0) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                for ans in data.get('Answer') or []:
+                    ip = ans.get('data')
+                    try:
+                        socket.inet_aton(ip)
+                        return ip
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        # Google DoH fallback
+        try:
+            url = f"https://dns.google/resolve?name={host}&type=A"
+            with urllib.request.urlopen(url, timeout=3.0) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                for ans in data.get('Answer') or []:
+                    ip = ans.get('data')
+                    try:
+                        socket.inet_aton(ip)
+                        return ip
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        return None
     
     def extract_real_ip_from_path(self, path):
         """Extract IP dari path seperti metode user"""
@@ -290,6 +330,10 @@ class RealGeolocationTester:
                 ws_settings["headers"]['Host'] = host_value
             outbound['streamSettings']['wsSettings'] = ws_settings
         
+        # Resolve server to IP to avoid system resolver usage
+        server_addr = account.get('server', '')
+        dial_address = self._resolve_to_ip(server_addr) or server_addr
+        
         # --- PROTOCOL SETTINGS (User's improved approach) ---
         if protocol_name == 'vless':
             user_config = {
@@ -301,7 +345,7 @@ class RealGeolocationTester:
                 user_config["flow"] = flow
             outbound['settings'] = {
                 "vnext": [{
-                    "address": account.get('server', ''),
+                    "address": dial_address,
                     "port": int(account.get('server_port', 443)),
                     "users": [user_config]
                 }]
@@ -318,14 +362,14 @@ class RealGeolocationTester:
                 user_config["encryption"] = encryption
             outbound['settings'] = {
                 "vnext": [{
-                    "address": account.get('server', ''),
+                    "address": dial_address,
                     "port": int(account.get('server_port', 443)),
                     "users": [user_config]
                 }]
             }
         elif protocol_name == 'trojan':
             server_config = {
-                "address": account.get('server', ''),
+                "address": dial_address,
                 "port": int(account.get('server_port', 443)),
                 "password": account.get('password', account.get('uuid', ''))
             }
@@ -337,7 +381,7 @@ class RealGeolocationTester:
             }
         elif protocol_name == 'shadowsocks':
             server_config = {
-                "address": account.get('server', ''),
+                "address": dial_address,
                 "port": int(account.get('server_port', 443)),
                 "method": account.get('method', ''),
                 "password": account.get('password', '')
@@ -367,6 +411,7 @@ class RealGeolocationTester:
             "log": {"loglevel": log_level, "access": access_log, "error": error_log},
             "dns": {"queryStrategy": "UseIPv4", "servers": servers},
             "inbounds": [{
+                "listen": "127.0.0.1",
                 "port": self.local_http_port,
                 "protocol": "http",
                 "settings": {}
