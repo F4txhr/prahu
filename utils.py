@@ -49,7 +49,7 @@ def is_alive(host, port=443, timeout=3) -> tuple[bool, int]:
         return False, -1
 
 def geoip_lookup(ip: str) -> dict:
-    default_result = {"Country": "❓", "Provider": "-", "ASN": "-"}
+    default_result = {"Country": "❓", "Provider": "-", "ASN": "-", "ISP": "-"}
     if not ip or not isinstance(ip, str): return default_result
     
     if not requests:
@@ -64,15 +64,20 @@ def geoip_lookup(ip: str) -> dict:
                 provider = data.get('org') or data.get('isp') or "-"
                 as_field = data.get('as') or ""
                 asn = "-"
+                isp_from_asn = "-"
                 if isinstance(as_field, str) and as_field.startswith("AS"):
                     # format: "AS15169 Google LLC" -> take first token as ASN
-                    asn = as_field.split()[0]
+                    parts = as_field.split()
+                    asn = parts[0]
+                    if len(parts) > 1:
+                        isp_from_asn = " ".join(parts[1:]).strip()
                 elif isinstance(provider, str) and provider.upper().startswith("AS"):
                     asn = provider.split()[0]
                 return {
                     "Country": get_flag_emoji(data.get('countryCode', '')),
                     "Provider": provider,
-                    "ASN": asn
+                    "ASN": asn,
+                    "ISP": isp_from_asn if isp_from_asn != "-" else provider
                 }
         return default_result
     except (requests.RequestException, AttributeError):

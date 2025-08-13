@@ -246,7 +246,7 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         break
 
                     geo_info = geoip_lookup(test_ip)
-                    provider = (geo_info.get('Provider') or '-').strip()
+                    provider = (geo_info.get('ISP') or geo_info.get('Provider') or '-').strip()
                     is_cdn = is_cdn_provider(provider)
                     result.update({
                         "Status": "✅",
