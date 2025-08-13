@@ -247,14 +247,18 @@ class RealGeolocationTester:
         network_type = transport.get('type') or account.get('network') or 'tcp'
         outbound['streamSettings']['network'] = network_type
         
+        # Derive host for testing (NEVER use account['server'] here)
+        headers = transport.get('headers', {}) if isinstance(transport, dict) else {}
+        eff_host = headers.get('Host') or (tls_config.get('sni') if isinstance(tls_config, dict) else None) or (tls_config.get('server_name') if isinstance(tls_config, dict) else None)
+        if not eff_host:
+            # As a very last resort, keep empty; XRAY may fail which is acceptable for invalid entries
+            eff_host = ""
+        
         # TLS settings
-        tls_enabled = bool(tls_config.get('enabled') or account.get('security') == 'tls')
+        tls_enabled = bool((isinstance(tls_config, dict) and tls_config.get('enabled')) or account.get('security') == 'tls')
         if tls_enabled:
             outbound['streamSettings']['security'] = 'tls'
-            # Fallback order: tls.sni -> tls.server_name -> transport.headers.Host -> server
-            headers = transport.get('headers', {}) if isinstance(transport, dict) else {}
-            host_hdr = headers.get('Host') if isinstance(headers, dict) else None
-            sni = tls_config.get('sni') or tls_config.get('server_name') or host_hdr or account.get('server', '')
+            sni = (tls_config.get('sni') if isinstance(tls_config, dict) else None) or (tls_config.get('server_name') if isinstance(tls_config, dict) else None) or eff_host
             outbound['streamSettings']['tlsSettings'] = {"serverName": sni}
         
         # WS settings
@@ -262,16 +266,13 @@ class RealGeolocationTester:
             ws_settings = {
                 "path": transport.get('path', '/') if isinstance(transport, dict) else '/'
             }
-            # Prefer independent 'host' (avoid deprecated headers.Host)
-            headers = transport.get('headers', {}) if isinstance(transport, dict) else {}
-            host_hdr = headers.get('Host')
-            if not host_hdr:
-                host_hdr = tls_config.get('sni') or tls_config.get('server_name') or account.get('server', '')
-            if host_hdr:
-                ws_settings["host"] = host_hdr
+            # independent host field (avoid deprecated headers)
+            if eff_host:
+                ws_settings["host"] = eff_host
             outbound['streamSettings']['wsSettings'] = ws_settings
         
-        # --- PROTOCOL SETTINGS (User's improved approach) ---
+        # --- PROTOCOL SETTINGS (build using eff_host only) ---
+        port_val = int(account.get('server_port', 443) or 443)
         if protocol_name == 'vless':
             user_config = {
                 "uuid": account.get('uuid', account.get('user_id', '')),
@@ -282,8 +283,8 @@ class RealGeolocationTester:
                 user_config["flow"] = flow
             outbound['settings'] = {
                 "vnext": [{
-                    "address": account.get('server', ''),
-                    "port": int(account.get('server_port', 443)),
+                    "address": eff_host,
+                    "port": port_val,
                     "users": [user_config]
                 }]
             }
@@ -299,15 +300,15 @@ class RealGeolocationTester:
                 user_config["encryption"] = encryption
             outbound['settings'] = {
                 "vnext": [{
-                    "address": account.get('server', ''),
-                    "port": int(account.get('server_port', 443)),
+                    "address": eff_host,
+                    "port": port_val,
                     "users": [user_config]
                 }]
             }
         elif protocol_name == 'trojan':
             server_config = {
-                "address": account.get('server', ''),
-                "port": int(account.get('server_port', 443)),
+                "address": eff_host,
+                "port": port_val,
                 "password": account.get('password', account.get('uuid', ''))
             }
             flow = account.get('flow')
@@ -318,8 +319,8 @@ class RealGeolocationTester:
             }
         elif protocol_name == 'shadowsocks':
             server_config = {
-                "address": account.get('server', ''),
-                "port": int(account.get('server_port', 443)),
+                "address": eff_host,
+                "port": port_val,
                 "method": account.get('method', ''),
                 "password": account.get('password', '')
             }

@@ -144,47 +144,16 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
         "XRAY": False
     }
 
-    tried_xray = False
+    def is_cdn_provider(provider: str) -> bool:
+        p = (provider or '').strip().lower()
+        return p in ("cloudflare", "cloudflare, inc.", "akamai", "fastly")
 
-    async with semaphore:
-        # === XRAY FIRST: primary method to obtain real egress ISP (only when enabled) ===
-        if USE_XRAY:
-            try:
-                tried_xray = True
-                from real_geolocation_tester import get_real_geolocation
-                real_geo = get_real_geolocation(account)
-                if real_geo and str(real_geo.get('Provider', '')).lower() not in ("cloudflare, inc.", "cloudflare"):
-                    result.update({
-                        "Status": "✅",
-                        "TestType": "XRAY",
-                        "Tested IP": real_geo.get('Tested IP', '-'),
-                        "Latency": real_geo.get('Latency', 0),
-                        "Jitter": real_geo.get('Jitter', 0),
-                        "ICMP": "✔",
-                        "Country": real_geo.get('Country', '❓'),
-                        "Provider": real_geo.get('Provider', '-'),
-                        "XRAY": True
-                    })
-                    print(f"✅ XRAY primary success: {vpn_type} egress {result['Tested IP']} {result['Provider']}")
-                    if live_results is not None:
-                        live_results[index].update(result)
-                        await asyncio.sleep(0)
-                    return result
-                else:
-                    print("⚠️ XRAY primary failed or behind CDN; will fallback to Non‑XRAY")
-            except ImportError:
-                print("⚠️ XRAY module not available; fallback to Non‑XRAY")
-            except Exception as e:
-                print(f"⚠️ XRAY primary error: {e}; fallback to Non‑XRAY")
-        else:
-            print("ℹ️ XRAY disabled for this phase; using Non‑XRAY fallback")
-
-        # === EXISTING NON‑XRAY LOGIC (fallback) ===
+    async def attempt_nonx() -> dict:
+        nonlocal result
         targets = get_test_targets(account)
         if not targets:
-            result['Status'] = '❌'
+            # no targets for Non‑XRAY
             return result
-        
         timeout_retries = 3
         for (test_ip, test_port, source_label, sni_for_tls) in targets:
             result['TimeoutCount'] = 0
@@ -209,7 +178,7 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                             with socket.create_connection((test_ip, test_port), timeout=5) as raw_sock:
                                 with context.wrap_socket(raw_sock, server_hostname=sni_for_tls) as tls_sock:
                                     tls_ok = True
-                        except Exception as e:
+                        except Exception:
                             tls_ok = False
                             result['Reason'] = 'TLSFail'
                     if tls_enabled and not tls_ok:
@@ -278,7 +247,7 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
 
                     geo_info = geoip_lookup(test_ip)
                     provider = (geo_info.get('Provider') or '-').strip()
-                    is_cdn = provider.lower() in ("cloudflare, inc.", "cloudflare", "akamai", "fastly")
+                    is_cdn = is_cdn_provider(provider)
                     result.update({
                         "Status": "✅",
                         "TestType": f"{source_label.upper()} {'WS' if is_ws else 'TCP'}",
@@ -290,7 +259,6 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         "Country": geo_info.get('Country', '❓')
                     })
                     print(f"✅ NON-XRAY success: {vpn_type} {test_ip}:{test_port} ({result['TestType']})")
-                    # DO NOT attempt XRAY again (primary already attempted or disabled)
                     if live_results is not None:
                         live_results[index].update(result)
                     return result
@@ -304,7 +272,6 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         live_results[index].update(result)
                         await asyncio.sleep(0)
                     await asyncio.sleep(RETRY_DELAY)
-
         # Fallback ping jika TCP gagal
         if targets:
             fallback_ip = targets[0][0]
@@ -314,7 +281,6 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                 if live_results is not None:
                     live_results[index].update(result)
                     await asyncio.sleep(0)
-
                 stats = get_network_stats(fallback_ip)
                 if stats.get("Latency") != -1:
                     geo_info = geoip_lookup(fallback_ip)
@@ -328,7 +294,6 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                     if live_results is not None:
                         live_results[index].update(result)
                     return result
-
                 if attempt < MAX_RETRIES - 1:
                     result['Status'] = '🔁'
                     result['Retry'] = attempt + 1
@@ -336,8 +301,65 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         live_results[index].update(result)
                         await asyncio.sleep(0)
                     await asyncio.sleep(RETRY_DELAY)
+        return result
 
-        result['Status'] = '❌'
-    if live_results is not None:
-        live_results[index].update(result)
-    return result
+    def attempt_xray_sync() -> dict:
+        nonlocal result
+        try:
+            from real_geolocation_tester import get_real_geolocation
+            real_geo = get_real_geolocation(account)
+            if real_geo:
+                provider = real_geo.get('Provider', '-')
+                result.update({
+                    "Status": "✅",
+                    "TestType": "XRAY",
+                    "Tested IP": real_geo.get('Tested IP', '-'),
+                    "Latency": real_geo.get('Latency', 0),
+                    "Jitter": real_geo.get('Jitter', 0),
+                    "ICMP": "✔",
+                    "Country": real_geo.get('Country', '❓'),
+                    "Provider": provider,
+                    "XRAY": True
+                })
+                if live_results is not None:
+                    live_results[index].update(result)
+                return result
+        except ImportError:
+            print("⚠️ XRAY module not available")
+        except Exception as e:
+            print(f"⚠️ XRAY error: {e}")
+        return result
+
+    async with semaphore:
+        # Determine path IP and host
+        path_str = account.get('_ss_path') or account.get('_ws_path') or ''
+        if not path_str:
+            transport = account.get('transport', {}) if isinstance(account.get('transport'), dict) else {}
+            path_str = transport.get('path') or ''
+        ip_from_path, _port_from_path = extract_ip_port_from_path(path_str)
+        transport = account.get('transport', {}) if isinstance(account.get('transport'), dict) else {}
+        headers = transport.get('headers', {}) if isinstance(transport.get('headers'), dict) else {}
+        host_hdr = headers.get('Host')
+        host_is_ip = _is_ip(host_hdr) if host_hdr else False
+
+        prefer_nonx_first = bool(ip_from_path or host_is_ip)
+
+        if prefer_nonx_first:
+            # Non‑XRAY first
+            nonx = await attempt_nonx()
+            # Check if got valid ISP; if not, XRAY fallback
+            provider = nonx.get('Provider')
+            has_valid = (nonx.get('Status') == '✅') and (provider and provider != '-' and not is_cdn_provider(provider))
+            if not has_valid:
+                xres = attempt_xray_sync()
+                if xres.get('XRAY') and xres.get('Status') == '✅':
+                    return xres
+            return nonx
+        else:
+            # Host is domain or no IP → XRAY first
+            xres = attempt_xray_sync()
+            if xres.get('XRAY') and xres.get('Status') == '✅':
+                return xres
+            # Fallback to Non‑XRAY if XRAY failed
+            nonx = await attempt_nonx()
+            return nonx
