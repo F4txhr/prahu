@@ -367,13 +367,20 @@ class RealGeolocationTester:
                 stream_settings['tlsSettings'] = tls_settings
             if network_type == 'ws':
                 ws_settings = {
-                    "path": path or '/',
-                    "headers": {"Host": host_hdr or sni or server_addr}
+                    "path": path or '/'
                 }
-                # Add independent 'host' per deprecation guidance
+                # Move Host out of headers to independent 'host' to avoid deprecation
                 ws_host_value = host_hdr or sni or server_addr
                 if ws_host_value:
                     ws_settings["host"] = ws_host_value
+                # Preserve any additional headers except Host
+                other_headers = {}
+                try:
+                    other_headers = {k: v for k, v in (headers or {}).items() if str(k).lower() != 'host'}
+                except Exception:
+                    other_headers = {}
+                if other_headers:
+                    ws_settings["headers"] = other_headers
                 stream_settings['wsSettings'] = ws_settings
             elif network_type == 'grpc':
                 stream_settings['grpcSettings'] = {"serviceName": service_name or ''}
@@ -437,12 +444,20 @@ class RealGeolocationTester:
                 ss_stream = {
                     "network": "ws",
                     "wsSettings": {
-                        "path": path or '/',
-                        "headers": {"Host": host_hdr or sni or server_addr}
+                        "path": path or '/'
                     }
                 }
                 # independent host
-                ss_stream['wsSettings']["host"] = host_hdr or sni or server_addr
+                if host_hdr or sni or server_addr:
+                    ss_stream['wsSettings']["host"] = host_hdr or sni or server_addr
+                # Preserve additional headers except Host
+                other_headers = {}
+                try:
+                    other_headers = {k: v for k, v in (headers or {}).items() if str(k).lower() != 'host'}
+                except Exception:
+                    other_headers = {}
+                if other_headers:
+                    ss_stream['wsSettings']["headers"] = other_headers
                 if security == 'tls':
                     ss_stream['security'] = 'tls'
                     ss_stream['tlsSettings'] = {"serverName": sni or host_hdr or server_addr}
