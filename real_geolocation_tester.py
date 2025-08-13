@@ -990,6 +990,15 @@ class RealGeolocationTester:
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as f:
                 json.dump(cfg, f)
                 tmp = f.name
+            # Also dump a readable copy to XRAY_LOG_DIR for debugging
+            try:
+                access_log, _ = self._get_log_paths()
+                dump_dir = os.path.dirname(access_log)
+                dump_path = os.path.join(dump_dir, 'last_config.json')
+                with open(dump_path, 'w') as df:
+                    json.dump(cfg, df, indent=2)
+            except Exception:
+                pass
             proc = subprocess.Popen([self.xray_path, '-c', tmp], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             return proc, tmp
         
