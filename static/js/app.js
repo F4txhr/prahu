@@ -567,7 +567,7 @@ async function listGithub(){ try { const f = await api('/api/list-github-files')
 async function loadGithubFile(){ try { const file=$('#gh-files').value; if(!file){ toast('Select file','warning'); return; } const d=await api('/api/load-config',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:'github',file_path:file})}); if(d.success){ toast(d.message||'Loaded','success'); } else { toast(d.message||'Load failed','error'); } } catch(err){ console.error(err); toast('Load failed','error'); } }
 
 // Add & Start
-function setMode(mode){ currentMode = 'default'; setModePill('XRAY'); }
+function setMode(mode){ currentMode = mode || 'fast'; setModePill(currentMode==='xray-only'?'XRAY-Only':'Fast'); }
 async function addAndStart(){
   try {
     const text = $('#vpn-input').value.trim(); if (!text){ toast('No input','warning'); return; }
@@ -580,7 +580,7 @@ async function addAndStart(){
     $('#vpn-input').value=''; toast('Starting tests…','info');
     // Show one global skeleton immediately to signal progress
     ensureGlobalSkeleton(true);
-    const payload = { mode: 'xray-only' };
+    const payload = { mode: currentMode };
     socket.emit('start_testing', payload);
   } catch (err) { console.error(err); toast('Start failed','error'); }
 }
@@ -652,7 +652,7 @@ async function bootstrap(){
     bindEvents();
     console.debug('[BOOT] bind ok');
     setStatus('Ready','success');
-    setMode('accurate');
+    setMode('fast');
     await loadSavedGitHub();
     console.debug('[BOOT] github ok');
     await restoreTesting();

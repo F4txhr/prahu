@@ -140,39 +140,44 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
     result = {
         "index": index, "VpnType": vpn_type, "OriginalTag": tag, "Latency": -1, "Jitter": -1, "ICMP": "N/A",
         "Country": "❓", "Provider": "-", "Tested IP": "-", "Status": "WAIT",
-        "OriginalAccount": account, "TestType": "N/A", "Retry": 0, "TimeoutCount": 0
+        "OriginalAccount": account, "TestType": "N/A", "Retry": 0, "TimeoutCount": 0,
+        "XRAY": False
     }
 
     tried_xray = False
 
     async with semaphore:
-        # === XRAY FIRST: primary method to obtain real egress ISP ===
-        try:
-            tried_xray = True
-            from real_geolocation_tester import get_real_geolocation
-            real_geo = get_real_geolocation(account)
-            if real_geo and str(real_geo.get('Provider', '')).lower() not in ("cloudflare, inc.", "cloudflare"):
-                result.update({
-                    "Status": "✅",
-                    "TestType": "XRAY",
-                    "Tested IP": real_geo.get('Tested IP', '-'),
-                    "Latency": real_geo.get('Latency', 0),
-                    "Jitter": real_geo.get('Jitter', 0),
-                    "ICMP": "✔",
-                    "Country": real_geo.get('Country', '❓'),
-                    "Provider": real_geo.get('Provider', '-')
-                })
-                print(f"✅ XRAY primary success: {vpn_type} egress {result['Tested IP']} {result['Provider']}")
-                if live_results is not None:
-                    live_results[index].update(result)
-                    await asyncio.sleep(0)
-                return result
-            else:
-                print("⚠️ XRAY primary failed or behind CDN; will fallback to Non‑XRAY")
-        except ImportError:
-            print("⚠️ XRAY module not available; fallback to Non‑XRAY")
-        except Exception as e:
-            print(f"⚠️ XRAY primary error: {e}; fallback to Non‑XRAY")
+        # === XRAY FIRST: primary method to obtain real egress ISP (only when enabled) ===
+        if USE_XRAY:
+            try:
+                tried_xray = True
+                from real_geolocation_tester import get_real_geolocation
+                real_geo = get_real_geolocation(account)
+                if real_geo and str(real_geo.get('Provider', '')).lower() not in ("cloudflare, inc.", "cloudflare"):
+                    result.update({
+                        "Status": "✅",
+                        "TestType": "XRAY",
+                        "Tested IP": real_geo.get('Tested IP', '-'),
+                        "Latency": real_geo.get('Latency', 0),
+                        "Jitter": real_geo.get('Jitter', 0),
+                        "ICMP": "✔",
+                        "Country": real_geo.get('Country', '❓'),
+                        "Provider": real_geo.get('Provider', '-'),
+                        "XRAY": True
+                    })
+                    print(f"✅ XRAY primary success: {vpn_type} egress {result['Tested IP']} {result['Provider']}")
+                    if live_results is not None:
+                        live_results[index].update(result)
+                        await asyncio.sleep(0)
+                    return result
+                else:
+                    print("⚠️ XRAY primary failed or behind CDN; will fallback to Non‑XRAY")
+            except ImportError:
+                print("⚠️ XRAY module not available; fallback to Non‑XRAY")
+            except Exception as e:
+                print(f"⚠️ XRAY primary error: {e}; fallback to Non‑XRAY")
+        else:
+            print("ℹ️ XRAY disabled for this phase; using Non‑XRAY fallback")
 
         # === EXISTING NON‑XRAY LOGIC (fallback) ===
         targets = get_test_targets(account)
@@ -285,7 +290,7 @@ async def test_account(account: dict, semaphore: asyncio.Semaphore, index: int, 
                         "Country": geo_info.get('Country', '❓')
                     })
                     print(f"✅ NON-XRAY success: {vpn_type} {test_ip}:{test_port} ({result['TestType']})")
-                    # DO NOT attempt XRAY again (primary already attempted)
+                    # DO NOT attempt XRAY again (primary already attempted or disabled)
                     if live_results is not None:
                         live_results[index].update(result)
                     return result

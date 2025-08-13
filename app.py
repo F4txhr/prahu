@@ -478,44 +478,30 @@ def handle_start_testing(payload=None):
             
             # Main async function to run tests
             async def run_all_tests():
-                selected_mode = (mode or 'accurate').lower()
+                selected_mode = (mode or 'fast').lower()
                 print(f"🧭 Orchestration mode: {selected_mode}")
                 t0 = datetime.now()
-                if selected_mode == 'xray-only' or selected_mode == 'default' or not selected_mode:
-                    # XRAY only as primary; Non‑XRAY handled as fallback inside test_account
-                    await run_phase(True)
-                    t_mid = datetime.now()
-                elif selected_mode == 'xray-only':
-                    # XRAY for all
+                if selected_mode == 'xray-only':
+                    # XRAY all accounts directly
                     await run_phase(True)
                     t_mid = t0
-                elif selected_mode == 'hybrid':
-                    print("🚦 Phase 1: Non‑Xray all")
-                    await run_phase(False)
-                    t_mid = datetime.now()
-                    successes = [(i, r) for i, r in enumerate(live_results) if r.get('Status') == '✅']
-                    # Sort by latency ascending (unknown treated as large)
-                    def latency_val(r):
-                        try:
-                            return float(r.get('Latency')) if isinstance(r.get('Latency'), (int, float, str)) else 1e9
-                        except Exception:
-                            return 1e9
-                    successes.sort(key=lambda x: latency_val(x[1]))
-                    n = int(top_n or 20)
-                    pick = [idx for idx, _ in successes[:max(1, n)]]
-                    print(f"🚦 Phase 2: XRAY Top‑N = {len(pick)}")
-                    if pick:
-                        await run_phase(True, pick)
                 else:
-                    # accurate: filter then xray
-                    print("🚦 Phase 1: Non‑Xray filter")
+                    # FAST MODE: Non‑XRAY first for speed, then XRAY only for accounts
+                    # that did not yield real provider (CDN/failed)
+                    print("🚦 Phase 1 (FAST): Non‑Xray all")
                     await run_phase(False)
                     t_mid = datetime.now()
-                    # shortlist indices that are success
-                    success_idx = [i for i, r in enumerate(live_results) if r.get('Status') == '✅']
-                    print(f"🚦 Phase 2: XRAY confirm on {len(success_idx)} accounts")
-                    if success_idx:
-                        await run_phase(True, success_idx)
+                    # Pick accounts needing XRAY: failed or provider indicates CDN front
+                    needs_xray_idx = []
+                    for i, r in enumerate(live_results):
+                        status = str(r.get('Status'))
+                        provider = str(r.get('Provider', '')).lower()
+                        is_cdn = provider in ("cloudflare", "cloudflare, inc.", "akamai", "fastly")
+                        if status != '✅' or is_cdn:
+                            needs_xray_idx.append(i)
+                    print(f"🚦 Phase 2 (FAST): XRAY refine on {len(needs_xray_idx)} accounts")
+                    if needs_xray_idx:
+                        await run_phase(True, needs_xray_idx)
                 t_end = datetime.now()
                 
                 # Count successful accounts (USER REQUEST: exclude dead accounts from final config)
