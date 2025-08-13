@@ -316,128 +316,142 @@ class RealGeolocationTester:
     
     def create_xray_config(self, account):
         """
-        USER'S IMPROVED METHOD: Create Xray config dengan proper VLESS/VMess handling
-        Based on working standalone script
+        Build Xray config following user's provided create_config(details) style,
+        adapted for stability (DoH resolve, logs, DNS, ws host, ALPN, inbound bind).
         """
-        protocol_name = account.get('type', '').lower()
-        outbound = {
-            "protocol": protocol_name,
-            "settings": {},
-            "streamSettings": {
-                "network": "tcp",
-                "security": "none"
-            }
-        }
-        
-        # --- STREAM SETTINGS (Handle transport & TLS first) ---
-        transport = account.get('transport', {})
-        tls_config = account.get('tls', {})
-        
-        # Determine network type
+        # Map account -> details shape expected by user's snippet
+        tls_cfg = account.get('tls') if isinstance(account.get('tls'), dict) else {}
+        transport = account.get('transport') if isinstance(account.get('transport'), dict) else {}
+        headers = transport.get('headers') if isinstance(transport.get('headers'), dict) else {}
         network_type = transport.get('type') or account.get('network') or 'tcp'
-        outbound['streamSettings']['network'] = network_type
-        
-        # TLS settings
-        tls_enabled = bool(tls_config.get('enabled') or account.get('security') == 'tls')
-        if tls_enabled:
-            outbound['streamSettings']['security'] = 'tls'
-            # Fallback order: tls.sni -> tls.server_name -> transport.headers.Host -> server
-            headers = transport.get('headers', {}) if isinstance(transport, dict) else {}
-            host_hdr = headers.get('Host') if isinstance(headers, dict) else None
-            sni = tls_config.get('sni') or tls_config.get('server_name') or host_hdr or account.get('server', '')
-            outbound['streamSettings']['tlsSettings'] = {"serverName": sni}
-            # Optional insecure toggle for environments without CA bundle
-            try:
-                insecure = os.getenv('XRAY_TLS_INSECURE', '0').strip().lower() in ('1','true','yes','on')
-                if insecure:
-                    outbound['streamSettings']['tlsSettings']["allowInsecure"] = True
-            except Exception:
-                pass
-        
-        # WS settings
-        if network_type == 'ws':
-            ws_settings = {
-                "path": transport.get('path', '/') if isinstance(transport, dict) else '/',
-                "headers": transport.get('headers', {}) if isinstance(transport, dict) else {}
-            }
-            # Prefer independent host field per Xray deprecation notice
-            host_value = (
-                tls_config.get('sni')
-                or tls_config.get('server_name')
-                or (transport.get('headers', {}).get('Host') if isinstance(transport, dict) and isinstance(transport.get('headers'), dict) else None)
-                or account.get('server', '')
-            )
-            if host_value:
-                ws_settings["host"] = host_value
-            # Ensure Host header present for backward compatibility
-            if tls_enabled and not ws_settings["headers"].get('Host') and host_value:
-                ws_settings["headers"]['Host'] = host_value
-            outbound['streamSettings']['wsSettings'] = ws_settings
-        
-        # Resolve server to IP to avoid system resolver usage
+        security = 'tls' if (bool(tls_cfg.get('enabled')) or account.get('security') == 'tls') else 'none'
+        sni = tls_cfg.get('sni') or tls_cfg.get('server_name')
+        alpn = tls_cfg.get('alpn')
+        host_hdr = headers.get('Host') or account.get('host')
+        path = transport.get('path') or account.get('_ws_path') or '/'
+        service_name = transport.get('serviceName') or account.get('serviceName')
         server_addr = account.get('server', '')
+        port = int(account.get('server_port', 443) or 443)
+        protocol = account.get('type', '').lower()
+        # user_id/uuid/password mapping
+        user_id = account.get('uuid') or account.get('user_id') or account.get('password') or ''
+        ss_method = account.get('method', '')
+        ss_password = account.get('password', '')
+        flow = account.get('flow')
+        encryption = account.get('encryption') or ('none' if protocol == 'vless' else None)
+
+        # Resolve server to IPv4 via DoH to avoid system resolver
         dial_address = self._resolve_to_ip(server_addr) or server_addr
-        
-        # --- PROTOCOL SETTINGS (User's improved approach) ---
+
+        # Protocol normalization for shadowsocks short name
+        protocol_name = 'shadowsocks' if protocol == 'ss' else protocol
+
+        outbound = {"protocol": protocol_name}
+
+        # --- STREAM SETTINGS (network/tls/ws/grpc) ---
+        if network_type != 'tcp':
+            stream_settings = {"network": network_type}
+            if security == 'tls':
+                stream_settings['security'] = 'tls'
+                tls_settings = {"serverName": sni or host_hdr or server_addr}
+                # Optional ALPN
+                if alpn:
+                    tls_settings["alpn"] = [alpn] if isinstance(alpn, str) else alpn
+                # Optional allowInsecure via env
+                try:
+                    insecure = os.getenv('XRAY_TLS_INSECURE', '0').strip().lower() in ('1','true','yes','on')
+                    if insecure:
+                        tls_settings["allowInsecure"] = True
+                except Exception:
+                    pass
+                stream_settings['tlsSettings'] = tls_settings
+            if network_type == 'ws':
+                ws_settings = {
+                    "path": path or '/',
+                    "headers": {"Host": host_hdr or sni or server_addr}
+                }
+                # Add independent 'host' per deprecation guidance
+                ws_host_value = host_hdr or sni or server_addr
+                if ws_host_value:
+                    ws_settings["host"] = ws_host_value
+                stream_settings['wsSettings'] = ws_settings
+            elif network_type == 'grpc':
+                stream_settings['grpcSettings'] = {"serviceName": service_name or ''}
+            outbound['streamSettings'] = stream_settings
+        else:
+            # Even on tcp, set TLS if explicitly requested
+            if security == 'tls':
+                outbound['streamSettings'] = {
+                    "network": "tcp",
+                    "security": "tls",
+                    "tlsSettings": {"serverName": sni or host_hdr or server_addr}
+                }
+
+        # --- VLESS & VMESS & TROJAN & SHADOWSOCKS ---
         if protocol_name == 'vless':
-            user_config = {
-                "uuid": account.get('uuid', account.get('user_id', '')),
-                "encryption": account.get('encryption', 'none') or 'none'
+            user = {
+                "uuid": user_id,
+                "encryption": encryption or "none"
             }
-            flow = account.get('flow')
             if flow:
-                user_config["flow"] = flow
+                user["flow"] = flow
             outbound['settings'] = {
                 "vnext": [{
                     "address": dial_address,
-                    "port": int(account.get('server_port', 443)),
-                    "users": [user_config]
+                    "port": port,
+                    "users": [user]
                 }]
             }
         elif protocol_name == 'vmess':
-            user_config = {
-                "id": account.get('uuid', account.get('user_id', ''))
-            }
-            alter_id = account.get('alter_id', account.get('alterId'))
+            user = {"id": user_id}
+            alter_id = account.get('alter_id') or account.get('alterId')
             if alter_id is not None:
-                user_config["alterId"] = int(alter_id)
-            encryption = account.get('encryption')
+                user["alterId"] = int(alter_id)
             if encryption:
-                user_config["encryption"] = encryption
+                user["encryption"] = encryption
             outbound['settings'] = {
                 "vnext": [{
                     "address": dial_address,
-                    "port": int(account.get('server_port', 443)),
-                    "users": [user_config]
+                    "port": port,
+                    "users": [user]
                 }]
             }
         elif protocol_name == 'trojan':
-            server_config = {
+            server = {
                 "address": dial_address,
-                "port": int(account.get('server_port', 443)),
-                "password": account.get('password', account.get('uuid', ''))
+                "port": port,
+                "password": user_id
             }
-            flow = account.get('flow')
             if flow:
-                server_config["flow"] = flow
-            outbound['settings'] = {
-                "servers": [server_config]
-            }
+                server["flow"] = flow
+            outbound['settings'] = {"servers": [server]}
         elif protocol_name == 'shadowsocks':
-            server_config = {
+            server = {
                 "address": dial_address,
-                "port": int(account.get('server_port', 443)),
-                "method": account.get('method', ''),
-                "password": account.get('password', '')
+                "port": port,
+                "method": ss_method,
+                "password": ss_password
             }
-            outbound['settings'] = {
-                "servers": [server_config]
-            }
+            # SS over WS
+            if network_type == 'ws':
+                ss_stream = {
+                    "network": "ws",
+                    "wsSettings": {
+                        "path": path or '/',
+                        "headers": {"Host": host_hdr or sni or server_addr}
+                    }
+                }
+                # independent host
+                ss_stream['wsSettings']["host"] = host_hdr or sni or server_addr
+                if security == 'tls':
+                    ss_stream['security'] = 'tls'
+                    ss_stream['tlsSettings'] = {"serverName": sni or host_hdr or server_addr}
+                outbound['streamSettings'] = ss_stream
+            outbound['settings'] = {"servers": [server]}
         else:
-            # Unknown protocol; let Xray handle basic fields
             outbound['settings'] = {}
-        
-        # Build top-level config with DNS and logs to Termux/home
+
+        # Top-level with logs, DNS and inbound binding
         log_level = os.getenv('XRAY_LOG_LEVEL', 'info')
         access_log, error_log = self._get_log_paths()
         dns_mode = os.getenv('XRAY_DNS_MODE', 'doh').lower()  # doh | udp
@@ -450,7 +464,7 @@ class RealGeolocationTester:
                 {"address": dns1 or "https+local://1.1.1.1/dns-query"},
                 {"address": dns2 or "https+local://8.8.8.8/dns-query"}
             ]
-        
+
         return {
             "log": {"loglevel": log_level, "access": access_log, "error": error_log},
             "dns": {"queryStrategy": "UseIPv4", "servers": servers},
