@@ -315,6 +315,7 @@ function bindEvents(){
     setMode(v);
   }));
   const b1=$('#btn-load-config'); if (b1) b1.addEventListener('click', () => { toast('Loading config…','info'); console.debug('[Action] loadConfig'); loadConfig(); });
+  const b0=$('#btn-use-source'); if (b0) b0.addEventListener('click', () => { const url='https://yumicftigarun.web.id/api/v1/sub/?format=raw&limit=10&vpn=vless,trojan,ss,vmess&port=80,443&domain=plus-store.naver.com&cc=ID,SG'; $('#vpn-input').value = url; toast('Source URL set','success'); });
   const b2=$('#btn-save-gh'); if (b2) b2.addEventListener('click', () => { toast('Saving GitHub…','info'); console.debug('[Action] saveGitHub'); loadConfig(); });
   const b3=$('#btn-list-gh'); if (b3) b3.addEventListener('click', () => { toast('Listing files…','info'); console.debug('[Action] listGitHub'); listGithub(); });
   const b4=$('#btn-load-gh'); if (b4) b4.addEventListener('click', () => { toast('Loading file…','info'); console.debug('[Action] loadGitHubFile'); loadGithubFile(); });
